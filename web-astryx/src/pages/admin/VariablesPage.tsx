@@ -23,6 +23,7 @@ import type { TableColumn } from '@astryxdesign/core/Table';
 import { PageBody } from '@/components/layout/PageBody';
 import { FeedbackError, FeedbackNotice } from '@/components/Feedback';
 import { DialogTitleBar } from '@/components/DialogTitleBar';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 
 // Table<T> đòi `T extends Record<string, unknown>` — bọc lại thay vì đụng apiClient.ts.
 interface VariableRow extends Variable {
@@ -64,6 +65,12 @@ export function VariablesPage() {
     const [importOpen, setImportOpen] = useState(false);
     const [importMode, setImportMode] = useState<ImportMode>('merge');
     const fileRef = useRef<HTMLInputElement>(null);
+    // File đã parse xong, đang chờ xác nhận trước khi gọi import.
+    const [pendingImport, setPendingImport] = useState<{ data: Record<string, string>; count: number } | null>(null);
+
+    // Key đang chờ xác nhận xoá.
+    const [pendingDelete, setPendingDelete] = useState<Variable | null>(null);
+    const [deleting, setDeleting] = useState(false);
 
     function reload() {
         listVariables()
@@ -112,15 +119,19 @@ export function VariablesPage() {
         }
     }
 
-    async function remove(row: Variable) {
-        if (!confirm(`Xoá key "${row.key}"?`)) return;
+    async function confirmDelete() {
+        if (!pendingDelete) return;
+        setDeleting(true);
         setError(null);
         setNotice(null);
         try {
-            await deleteVariable(row.key);
+            await deleteVariable(pendingDelete.key);
             reload();
         } catch (err) {
             setError(err instanceof ApiError ? err.message : 'Xoá thất bại');
+        } finally {
+            setDeleting(false);
+            setPendingDelete(null);
         }
     }
 
@@ -144,31 +155,29 @@ export function VariablesPage() {
 
         setError(null);
         setNotice(null);
-        let data: Record<string, string>;
         try {
-            data = parseImportFile(await file.text());
+            const data = parseImportFile(await file.text());
+            // Đóng dialog chọn file, mở dialog xác nhận (không lồng dialog trong dialog).
+            setImportOpen(false);
+            setPendingImport({ data, count: Object.keys(data).length });
         } catch (err) {
             setError(err instanceof Error ? err.message : 'File không hợp lệ');
-            return;
         }
+    }
 
-        const n = Object.keys(data).length;
-        const question =
-            importMode === 'replace'
-                ? `Import kiểu THAY TOÀN BỘ: xoá sạch ${rows?.length ?? 0} dòng hiện có rồi nạp ${n} dòng từ file. Tiếp tục?`
-                : `Import kiểu GỘP: thêm/ghi đè ${n} dòng từ file, giữ nguyên các key khác. Tiếp tục?`;
-        if (!confirm(question)) return;
-
+    async function confirmImport() {
+        if (!pendingImport) return;
         setBusy(true);
+        setError(null);
         try {
-            const res = await importVariables(importMode, data);
+            const res = await importVariables(importMode, pendingImport.data);
             setNotice(`Import xong (${res.mode}): ${res.count} dòng`);
-            setImportOpen(false);
             reload();
         } catch (err) {
             setError(err instanceof ApiError ? err.message : 'Import thất bại');
         } finally {
             setBusy(false);
+            setPendingImport(null);
         }
     }
 
@@ -216,7 +225,7 @@ export function VariablesPage() {
                         label="Xoá"
                         variant="ghost"
                         size="sm"
-                        onClick={() => remove(row)}
+                        onClick={() => setPendingDelete(row)}
                         icon={<Icon icon={Trash2} size="sm" color="error" />}
                     />
                 </HStack>
@@ -364,6 +373,32 @@ export function VariablesPage() {
                     {error && <FeedbackError>{error}</FeedbackError>}
                 </VStack>
             </Dialog>
+
+            <ConfirmDialog
+                isOpen={pendingDelete !== null}
+                title="Xoá key"
+                message={`Xoá key "${pendingDelete?.key}"? Không khôi phục được.`}
+                confirmLabel="Xoá"
+                tone="destructive"
+                isBusy={deleting}
+                onConfirm={confirmDelete}
+                onOpenChange={(open) => !open && setPendingDelete(null)}
+            />
+
+            <ConfirmDialog
+                isOpen={pendingImport !== null}
+                title="Xác nhận import"
+                message={
+                    importMode === 'replace'
+                        ? `Thay TOÀN BỘ: xoá sạch ${rows?.length ?? 0} dòng hiện có rồi nạp ${pendingImport?.count ?? 0} dòng từ file.`
+                        : `Gộp: thêm/ghi đè ${pendingImport?.count ?? 0} dòng từ file, giữ nguyên các key khác.`
+                }
+                confirmLabel="Import"
+                tone={importMode === 'replace' ? 'destructive' : 'primary'}
+                isBusy={busy}
+                onConfirm={confirmImport}
+                onOpenChange={(open) => !open && setPendingImport(null)}
+            />
         </PageBody>
     );
 }

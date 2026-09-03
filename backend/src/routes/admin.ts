@@ -169,6 +169,18 @@ adminRoutes.get('/logs', async (c) => {
     return c.json({ logs: rows });
 });
 
+// Dọn sạch nhật ký. Không có bộ lọc theo ngày: bảng này chỉ để debug gần, xoá hết là
+// đủ. Mất hết cũng không sao — bot chạy lần sau lại ghi tiếp.
+adminRoutes.delete('/logs', async (c) => {
+    try {
+        const db = drizzle(c.env.assistant_db, { schema });
+        await db.delete(executionLogs);
+        return c.json({ ok: true });
+    } catch (err) {
+        return serverError(c, err, 'admin.logs.clear');
+    }
+});
+
 /* ---------- Variables: kho key-value dùng chung ---------- */
 
 // Giới hạn để một lần ghi không ăn hết trần 10ms CPU của Workers Free.

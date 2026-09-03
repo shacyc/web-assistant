@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react';
-import { listLogs, ApiError, type ExecutionLog } from '@/lib/apiClient';
+import { Trash2 } from 'lucide-react';
+import { listLogs, clearLogs, ApiError, type ExecutionLog } from '@/lib/apiClient';
+import { HStack } from '@astryxdesign/core/Stack';
 import { Heading, Text } from '@astryxdesign/core/Text';
 import { Badge } from '@astryxdesign/core/Badge';
+import { Button } from '@astryxdesign/core/Button';
+import { Icon } from '@astryxdesign/core/Icon';
 import { Spinner } from '@astryxdesign/core/Spinner';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { Table, proportional, pixel } from '@astryxdesign/core/Table';
 import type { TableColumn } from '@astryxdesign/core/Table';
 import { PageBody } from '@/components/layout/PageBody';
 import { FeedbackError } from '@/components/Feedback';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 
 // Table<T> đòi `T extends Record<string, unknown>` — bọc lại thay vì đụng apiClient.ts.
 interface LogRow extends ExecutionLog {
@@ -17,12 +22,30 @@ interface LogRow extends ExecutionLog {
 export function LogsPage() {
     const [rows, setRows] = useState<ExecutionLog[] | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [busy, setBusy] = useState(false);
 
-    useEffect(() => {
+    function reload() {
         listLogs()
             .then(({ logs }) => setRows(logs))
             .catch((err) => setError(err instanceof ApiError ? err.message : 'Không tải được nhật ký'));
-    }, []);
+    }
+
+    useEffect(reload, []);
+
+    async function empty() {
+        setBusy(true);
+        setError(null);
+        try {
+            await clearLogs();
+            reload();
+        } catch (err) {
+            setError(err instanceof ApiError ? err.message : 'Xoá thất bại');
+        } finally {
+            setBusy(false);
+            setConfirmOpen(false);
+        }
+    }
 
     const columns: TableColumn<LogRow>[] = [
         {
@@ -68,7 +91,17 @@ export function LogsPage() {
 
     return (
         <PageBody>
-            <Heading level={1}>Nhật ký thực thi</Heading>
+            <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
+                <Heading level={1}>Nhật ký thực thi</Heading>
+                <Button
+                    label="Dọn nhật ký"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setConfirmOpen(true)}
+                    isDisabled={!rows || rows.length === 0}
+                    icon={<Icon icon={Trash2} size="sm" color="error" />}
+                />
+            </HStack>
 
             {error && <FeedbackError>{error}</FeedbackError>}
             {rows === null && !error && <Spinner label="Đang tải…" />}
@@ -84,6 +117,17 @@ export function LogsPage() {
                     textOverflow="truncate"
                 />
             )}
+
+            <ConfirmDialog
+                isOpen={confirmOpen}
+                title="Dọn nhật ký"
+                message="Xoá sạch toàn bộ nhật ký thực thi? Không khôi phục được."
+                confirmLabel="Xoá hết"
+                tone="destructive"
+                isBusy={busy}
+                onConfirm={empty}
+                onOpenChange={setConfirmOpen}
+            />
         </PageBody>
     );
 }

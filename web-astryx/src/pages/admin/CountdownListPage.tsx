@@ -12,6 +12,7 @@ import { Table, proportional, pixel } from '@astryxdesign/core/Table';
 import type { TableColumn } from '@astryxdesign/core/Table';
 import { PageBody } from '@/components/layout/PageBody';
 import { FeedbackError } from '@/components/Feedback';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { CountdownFormDialog } from './CountdownFormDialog';
 
 /** Cùng cách tính "hôm nay" với backend, để admin nhìn thấy đúng thứ bot sẽ gửi. */
@@ -45,6 +46,9 @@ export function CountdownListPage() {
     // dialogOpen tách khỏi `editing` để lúc đóng vẫn giữ nội dung cũ (không nhấp nháy).
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editing, setEditing] = useState<CountdownEvent | null>(null);
+    // Dòng đang chờ xác nhận xoá (null = không mở dialog xoá).
+    const [pendingDelete, setPendingDelete] = useState<CountdownEvent | null>(null);
+    const [deleting, setDeleting] = useState(false);
     const today = todayVN();
 
     function openCreate() {
@@ -67,13 +71,18 @@ export function CountdownListPage() {
 
     useEffect(reload, []);
 
-    async function remove(row: CountdownEvent) {
-        if (!confirm(`Xoá "${row.event}"?`)) return;
+    async function confirmDelete() {
+        if (!pendingDelete) return;
+        setDeleting(true);
+        setError(null);
         try {
-            await deleteCountdown(row.id);
+            await deleteCountdown(pendingDelete.id);
             reload();
         } catch (err) {
             setError(err instanceof ApiError ? err.message : 'Xoá thất bại');
+        } finally {
+            setDeleting(false);
+            setPendingDelete(null);
         }
     }
 
@@ -142,7 +151,7 @@ export function CountdownListPage() {
                         label="Xoá"
                         variant="ghost"
                         size="sm"
-                        onClick={() => remove(row)}
+                        onClick={() => setPendingDelete(row)}
                         icon={<Icon icon={Trash2} size="sm" color="error" />}
                     />
                 </HStack>
@@ -195,6 +204,17 @@ export function CountdownListPage() {
                 editing={editing}
                 onOpenChange={setDialogOpen}
                 onSaved={reload}
+            />
+
+            <ConfirmDialog
+                isOpen={pendingDelete !== null}
+                title="Xoá sự kiện"
+                message={`Xoá "${pendingDelete?.event}"? Không khôi phục được.`}
+                confirmLabel="Xoá"
+                tone="destructive"
+                isBusy={deleting}
+                onConfirm={confirmDelete}
+                onOpenChange={(open) => !open && setPendingDelete(null)}
             />
         </PageBody>
     );

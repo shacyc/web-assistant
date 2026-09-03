@@ -139,6 +139,7 @@ export const updateCountdown = (id: string, patch: Partial<CountdownInput>) =>
 export const deleteCountdown = (id: string) => request<{ ok: true }>('DELETE', `/admin/countdowns/${id}`);
 
 export const listLogs = () => request<{ logs: ExecutionLog[] }>('GET', '/admin/logs');
+export const clearLogs = () => request<{ ok: true }>('DELETE', '/admin/logs');
 
 /* ---------- Variables: kho key-value ---------- */
 

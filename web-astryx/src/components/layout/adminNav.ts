@@ -17,3 +17,11 @@ export const adminNav: AdminNavItem[] = [
     { to: '/admin/variables', label: 'Variables', icon: Variable },
     { to: '/admin/logs', label: 'Nhật ký', icon: History },
 ];
+
+/** Mục nav ứng với path hiện tại — dùng chung cho `isSelected` của sidebar và tiêu đề
+ *  thanh bar trên mobile. */
+export function matchNav(pathname: string): AdminNavItem | undefined {
+    return adminNav.find((i) =>
+        i.end ? pathname === i.to : pathname === i.to || pathname.startsWith(`${i.to}/`),
+    );
+}

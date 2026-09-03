@@ -131,3 +131,25 @@ describe('CRUD countdown', () => {
         expect(countdowns).toHaveLength(0);
     });
 });
+
+describe('nhật ký', () => {
+    it('DELETE /logs dọn sạch bảng — bỏ dòng db.delete thì test này đỏ', async () => {
+        const cookie = await adminCookie();
+        await env.assistant_db
+            .prepare("INSERT INTO execution_logs (id, action_id, status, detail) VALUES (?, 'countdown.notify', 'ok', 'x')")
+            .bind(crypto.randomUUID())
+            .run();
+
+        const before = (await (await req('/api/admin/logs', { cookie })).json()) as { logs: unknown[] };
+        expect(before.logs).toHaveLength(1);
+
+        expect((await req('/api/admin/logs', { method: 'DELETE', cookie })).status).toBe(200);
+
+        const after = (await (await req('/api/admin/logs', { cookie })).json()) as { logs: unknown[] };
+        expect(after.logs).toHaveLength(0);
+    });
+
+    it('DELETE /logs không cookie → 401', async () => {
+        expect((await req('/api/admin/logs', { method: 'DELETE' })).status).toBe(401);
+    });
+});
