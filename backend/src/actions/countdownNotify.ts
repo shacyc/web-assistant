@@ -1,8 +1,35 @@
 import { and, eq, lte, gte, asc } from 'drizzle-orm';
-import { countdownEvents } from '../db/schema';
+import { countdownEvents, countdownConfig, variables } from '../db/schema';
 import { formatCountdownMessage } from '../telegram/format';
 import { sendTelegram } from '../telegram/send';
+import type { Db } from '../types';
 import type { BotAction } from './types';
+
+/**
+ * Đích gửi (chat id / topic id) KHÔNG còn là secret của Worker: admin trỏ `countdown_config`
+ * tới key nào trong bảng `variables`, rồi sửa giá trị qua UI mà không cần deploy. Đổi lại,
+ * action phải tự kiểm cấu hình lúc chạy và báo lỗi cụ thể — thiếu bước này thì tin nhắn
+ * âm thầm rơi vào "General" hoặc 400.
+ */
+async function resolveTarget(db: Db): Promise<{ chatId: string; topicId?: string } | { error: string }> {
+    const [cfg] = await db.select().from(countdownConfig).where(eq(countdownConfig.id, 1)).limit(1);
+    if (!cfg?.chatIdKey) {
+        return { error: 'Chưa chọn key chứa Telegram chat id — vào màn Cấu hình để thiết lập.' };
+    }
+
+    const rows = await db.select().from(variables);
+    const byKey = new Map(rows.map((r) => [r.key, r.value]));
+
+    const chatId = byKey.get(cfg.chatIdKey)?.trim();
+    if (!chatId) {
+        return { error: `Key "${cfg.chatIdKey}" chưa có giá trị (màn Variables).` };
+    }
+
+    // topicIdKey là tuỳ chọn. Có trỏ key nhưng key rỗng/không tồn tại → gửi vào "General"
+    // thay vì chặn: nhóm không bật Topics là trường hợp hợp lệ.
+    const topicId = cfg.topicIdKey ? byKey.get(cfg.topicIdKey)?.trim() || undefined : undefined;
+    return { chatId, topicId };
+}
 
 export const countdownNotify: BotAction = {
     id: 'countdown.notify',
@@ -50,19 +77,26 @@ export const countdownNotify: BotAction = {
             return { ok: true, summary: 'Không có sự kiện nào đang chạy hôm nay — không gửi gì.', data: { sent: false, reason: 'no_active_events', count: 0 } };
         }
 
+        // Kiểm đích gửi TRƯỚC cả dryRun: "chạy thử" là để xem sẽ gửi gì VÀ gửi đi đâu,
+        // nên cấu hình hỏng phải lộ ra ở đây chứ không đợi tới lần gửi thật.
+        const target = await resolveTarget(ctx.db);
+        if ('error' in target) {
+            return { ok: false, summary: target.error, data: { sent: false, reason: 'not_configured', error: target.error } };
+        }
+
         if (dryRun) {
             return {
                 ok: true,
-                summary: `[CHẠY THỬ] ${rows.length} sự kiện. Nội dung sẽ gửi:\n\n${message}`,
-                data: { sent: false, reason: 'dry_run', count: rows.length, message },
+                summary: `[CHẠY THỬ] ${rows.length} sự kiện → chat ${target.chatId}${target.topicId ? ` / topic ${target.topicId}` : ''}. Nội dung sẽ gửi:\n\n${message}`,
+                data: { sent: false, reason: 'dry_run', count: rows.length, message, chatId: target.chatId, topicId: target.topicId },
             };
         }
 
         const result = await sendTelegram(
             ctx.env.TELEGRAM_BOT_TOKEN,
-            ctx.env.TELEGRAM_CHAT_ID,
+            target.chatId,
             message,
-            ctx.env.TELEGRAM_TOPIC_ID,
+            target.topicId,
         );
         if (!result.ok) {
             return { ok: false, summary: `Gửi Telegram thất bại: ${result.error}`, data: { sent: false, error: result.error } };

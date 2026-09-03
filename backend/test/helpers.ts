@@ -16,9 +16,12 @@ beforeAll(async () => {
 });
 
 // Mỗi test bắt đầu từ bảng rỗng — test nào dựa vào dữ liệu của test trước là test giả.
+// Kể cả các dòng do migration 0001 seed: test nào cần chúng thì tự seedVariable().
 beforeEach(async () => {
     await env.assistant_db.exec('DELETE FROM countdown_events');
     await env.assistant_db.exec('DELETE FROM execution_logs');
+    await env.assistant_db.exec('DELETE FROM variables');
+    await env.assistant_db.exec('DELETE FROM countdown_config');
 });
 
 export { SELF };
@@ -104,6 +107,32 @@ export interface SeedOverrides {
     startDate?: string;
     endDate?: string;
     enabled?: number;
+}
+
+/** Đặt một dòng vào kho key-value. Ghi đè nếu key đã có. */
+export async function seedVariable(key: string, value: string) {
+    await env.assistant_db
+        .prepare('INSERT INTO variables (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+        .bind(key, value)
+        .run();
+}
+
+/**
+ * Trỏ countdown_config tới các key cho trước VÀ seed luôn giá trị của chúng. Mặc định
+ * dựng một cấu hình chạy được để test countdown.notify không phải lặp lại 4 dòng seed.
+ */
+export async function seedCountdownConfig(
+    over: { chatIdKey?: string; chatId?: string; topicIdKey?: string | null; topicId?: string } = {},
+) {
+    const chatIdKey = over.chatIdKey ?? 'secretary telegram chat id';
+    const topicIdKey = over.topicIdKey === undefined ? 'secretary daily topic id' : over.topicIdKey;
+    if (over.chatId !== undefined) await seedVariable(chatIdKey, over.chatId);
+    if (topicIdKey && over.topicId !== undefined) await seedVariable(topicIdKey, over.topicId);
+    await env.assistant_db
+        .prepare('INSERT INTO countdown_config (id, chat_id_key, topic_id_key) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET chat_id_key = excluded.chat_id_key, topic_id_key = excluded.topic_id_key')
+        .bind(chatIdKey, topicIdKey)
+        .run();
+    return { chatIdKey, topicIdKey };
 }
 
 export async function seedEvent(over: SeedOverrides = {}) {

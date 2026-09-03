@@ -68,6 +68,23 @@ export class Body {
         return trimmed;
     }
 
+    /**
+     * Chuỗi bắt buộc CÓ MẶT nhưng cho phép rỗng. Dùng cho `value` của bảng variables:
+     * "đặt key này thành chuỗi rỗng" là thao tác hợp lệ, khác hẳn "không gửi field".
+     */
+    presentString(name: string, max: number): string {
+        const v = this.raw[name];
+        if (typeof v !== 'string') {
+            this.fail(name, 'phải là chuỗi');
+            return '';
+        }
+        if (v.length > max) {
+            this.fail(name, `dài quá ${max} ký tự`);
+            return '';
+        }
+        return v;
+    }
+
     /** Chuỗi tuỳ chọn. Gửi null tường minh = xoá; không gửi = giữ nguyên. */
     optionalString(name: string, max: number): string | null | undefined {
         if (this.raw[name] === undefined) return undefined;

@@ -3,5 +3,6 @@ SESSION_SECRET=""
 BOT_SECRET=""
 ADMIN_PASSWORD="dev-admin"
 ADMIN_AUTH_MODE="password"
+# Chat id / topic id KHÔNG còn ở đây — chúng nằm trong bảng `variables`, sửa qua màn
+# admin /admin/variables. Migration seed sẵn hai key mặc định.
 TELEGRAM_BOT_TOKEN=""
-TELEGRAM_CHAT_ID=""

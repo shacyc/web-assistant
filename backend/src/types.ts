@@ -24,8 +24,8 @@ export interface Bindings {
     BOT_SECRET: string;
     ADMIN_PASSWORD: string;
     TELEGRAM_BOT_TOKEN: string;
-    TELEGRAM_CHAT_ID: string;
-    TELEGRAM_TOPIC_ID?: string; // id topic của forum group; bỏ trống = gửi vào "General"
+    // Chat id và topic id KHÔNG còn là secret: chúng nằm trong bảng `variables`, admin
+    // sửa được qua UI. countdown_config trỏ tới key nào chứa chúng. Xem routes/admin.ts.
 }
 
 export interface Env {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SELF, env, botToken, seedEvent, mockTelegram, type TelegramMock } from './helpers';
+import { SELF, env, botToken, seedEvent, seedCountdownConfig, mockTelegram, type TelegramMock } from './helpers';
 import { today } from '../src/lib/dates';
 
 // Bật mock cho MỌI test trong file: request ra ngoài không phải Telegram sẽ ném lỗi,
@@ -7,6 +7,11 @@ import { today } from '../src/lib/dates';
 let tg: TelegramMock;
 beforeEach(() => { tg = mockTelegram(); });
 afterEach(() => tg.restore());
+
+// Đích gửi giờ đến từ bảng `variables` chứ không phải secret — test tự seed giá trị và
+// so lại đúng giá trị đó.
+const CHAT_ID = '-100987654321';
+const TOPIC_ID = '19';
 
 const run = async (payload: Record<string, unknown> = {}) =>
     SELF.fetch('https://x/api/bot/actions/countdown.notify/run', {
@@ -24,6 +29,7 @@ const shift = (days: number) => {
 
 describe('countdown.notify', () => {
     it('không có event active → không gọi Telegram', async () => {
+        await seedCountdownConfig({ chatId: CHAT_ID, topicId: TOPIC_ID });
         await seedEvent({ startDate: shift(10), endDate: shift(20) }); // pending
         await seedEvent({ startDate: shift(-20), endDate: shift(-10) }); // finished
 
@@ -37,29 +43,58 @@ describe('countdown.notify', () => {
     });
 
     it('bỏ qua event enabled = false', async () => {
+        await seedCountdownConfig({ chatId: CHAT_ID, topicId: TOPIC_ID });
         await seedEvent({ event: 'Đã tắt', startDate: shift(-5), endDate: shift(5), enabled: 0 });
         const body = (await (await run()).json()) as { data: { sent: boolean; reason: string } };
         expect(body.data.reason).toBe('no_active_events');
         expect(tg.calls).toHaveLength(0);
     });
 
-    it('dryRun = true → dựng nội dung nhưng TUYỆT ĐỐI không gọi Telegram', async () => {
+    it('chưa cấu hình key chat id → ok:false, KHÔNG gọi Telegram', async () => {
+        // Có event active nhưng không có countdown_config: phải báo lỗi chứ không gửi mù.
+        await seedEvent({ event: 'Đang chạy', startDate: shift(-5), endDate: shift(5) });
+
+        const res = await run();
+        expect(res.status).toBe(502);
+        const body = (await res.json()) as { ok: boolean; summary: string; data: { reason: string } };
+        expect(body.ok).toBe(false);
+        expect(body.data.reason).toBe('not_configured');
+        expect(body.summary).toContain('Cấu hình');
+        expect(tg.calls).toHaveLength(0);
+    });
+
+    it('key chat id đã trỏ nhưng chưa có giá trị → ok:false', async () => {
+        // chatIdKey được set trong config, nhưng không seed dòng variables tương ứng.
+        await seedCountdownConfig({ topicIdKey: null });
+        await seedEvent({ event: 'Đang chạy', startDate: shift(-5), endDate: shift(5) });
+
+        const body = (await (await run()).json()) as { ok: boolean; data: { reason: string } };
+        expect(body.ok).toBe(false);
+        expect(body.data.reason).toBe('not_configured');
+        expect(tg.calls).toHaveLength(0);
+    });
+
+    it('dryRun = true → dựng nội dung + đích gửi nhưng TUYỆT ĐỐI không gọi Telegram', async () => {
+        await seedCountdownConfig({ chatId: CHAT_ID, topicId: TOPIC_ID });
         await seedEvent({ event: 'Đang chạy', startDate: shift(-5), endDate: shift(5) });
 
         const body = (await (await run({ dryRun: true })).json()) as {
             ok: boolean;
             summary: string;
-            data: { sent: boolean; reason: string; message: string };
+            data: { sent: boolean; reason: string; message: string; chatId: string; topicId: string };
         };
         expect(body.ok).toBe(true);
         expect(body.data.sent).toBe(false);
         expect(body.data.reason).toBe('dry_run');
         expect(body.data.message).toContain('Đang chạy');
+        expect(body.data.chatId).toBe(CHAT_ID);
+        expect(body.data.topicId).toBe(TOPIC_ID);
         expect(body.summary).toContain('CHẠY THỬ');
         expect(tg.calls).toHaveLength(0);
     });
 
-    it('gửi thật: đúng MỘT tin nhắn gộp mọi event active', async () => {
+    it('gửi thật: đúng MỘT tin nhắn gộp mọi event active, tới đích lấy từ variables', async () => {
+        await seedCountdownConfig({ chatId: CHAT_ID, topicId: TOPIC_ID });
         await seedEvent({ event: 'Một', startDate: shift(-5), endDate: shift(5) });
         await seedEvent({ event: 'Hai', startDate: shift(-2), endDate: shift(8) });
         await seedEvent({ event: 'Chưa tới', startDate: shift(30), endDate: shift(40) });
@@ -70,17 +105,29 @@ describe('countdown.notify', () => {
         expect(body.data.count).toBe(2);
 
         expect(tg.calls).toHaveLength(1);
-        expect(tg.calls[0].chat_id).toBe(env.TELEGRAM_CHAT_ID);
-        // Có TELEGRAM_TOPIC_ID → phải kèm message_thread_id (số, không phải chuỗi),
-        // nếu không tin nhắn rơi vào "General". Bỏ spread trong send.ts là test này đỏ.
-        expect(tg.calls[0].message_thread_id).toBe(Number(env.TELEGRAM_TOPIC_ID));
+        expect(tg.calls[0].chat_id).toBe(CHAT_ID);
+        // topicIdKey trỏ tới key có giá trị → phải kèm message_thread_id (số, không phải
+        // chuỗi), nếu không tin nhắn rơi vào "General". Bỏ spread trong send.ts là test này đỏ.
+        expect(tg.calls[0].message_thread_id).toBe(Number(TOPIC_ID));
         expect(tg.calls[0].parse_mode).toBe('MarkdownV2');
         expect(tg.calls[0].text).toContain('Một');
         expect(tg.calls[0].text).toContain('Hai');
         expect(tg.calls[0].text).not.toContain('Chưa tới');
     });
 
+    it('topicIdKey = null → gửi không kèm message_thread_id', async () => {
+        await seedCountdownConfig({ chatId: CHAT_ID, topicIdKey: null });
+        await seedEvent({ event: 'X', startDate: shift(-1), endDate: shift(1) });
+
+        const body = (await (await run()).json()) as { data: { sent: boolean } };
+        expect(body.data.sent).toBe(true);
+        expect(tg.calls).toHaveLength(1);
+        expect(tg.calls[0].chat_id).toBe(CHAT_ID);
+        expect(tg.calls[0].message_thread_id).toBeUndefined();
+    });
+
     it('Telegram trả lỗi → 502, ok:false, giữ nguyên câu giải thích', async () => {
+        await seedCountdownConfig({ chatId: CHAT_ID, topicId: TOPIC_ID });
         tg.failNext(400, { ok: false, description: "can't parse entities" });
         await seedEvent({ event: 'X', startDate: shift(-1), endDate: shift(1) });
 
@@ -92,6 +139,7 @@ describe('countdown.notify', () => {
     });
 
     it('ghi execution_logs sau khi chạy', async () => {
+        await seedCountdownConfig({ chatId: CHAT_ID, topicId: TOPIC_ID });
         await seedEvent({ event: 'X', startDate: shift(-1), endDate: shift(1) });
         await run();
 

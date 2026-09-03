@@ -146,13 +146,19 @@ Nạp bằng `wrangler secret put`, **không bao giờ** đặt vào `vars` củ
 | `BOT_SECRET` | key bot nhập ở cổng vào `/bot` |
 | `SESSION_SECRET` | ký JWT session |
 | `TELEGRAM_BOT_TOKEN` | gọi Telegram Bot API |
-| `TELEGRAM_CHAT_ID` | đích gửi |
 | `ADMIN_PASSWORD` | chỉ dùng khi `ADMIN_AUTH_MODE=password` |
 
 Đây không phải quy ước cho vui. ummi-reader từng commit `TELEGRAM_BOT_TOKEN` thẳng vào
 `[vars]` của `wrangler.toml`; token nằm lại trong git history và phải revoke qua
 @BotFather. Mọi key trong `vars` sẽ bị `wrangler deploy` push lên và **ghi đè** giá trị
 set qua dashboard.
+
+**Chat id / topic id KHÔNG phải secret.** Chúng nằm trong bảng `variables` (kho key-value
+admin sửa qua `/admin/variables`), không phải `wrangler secret`. Lý do: admin cần đổi đích
+gửi mà không phải deploy, và giá trị này lộ ra cũng chỉ là "gửi nhầm nhóm" chứ không phải
+chiếm quyền bot. `countdown_config` (bảng một dòng) trỏ tới key nào chứa chat id / topic id;
+màn `/admin/config` chỉnh mapping đó. `countdown.notify` đọc chúng lúc chạy, thiếu thì báo
+lỗi rõ ràng chứ không gửi nhầm. Migration `0001` seed sẵn hai key mặc định + mapping.
 
 ## Hai chế độ auth admin
 

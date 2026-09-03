@@ -48,25 +48,30 @@ export function DatePicker({
 
     return (
         <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-                <Button
-                    type="button"
-                    id={id}
-                    aria-invalid={ariaInvalid}
-                    aria-describedby={ariaDescribedby}
-                    variant="outline"
-                    // Kéo cho khớp <Input>: canh trái, chữ thường, cùng shadow-xs. Nền/viền
-                    // đã do variant="outline" lo (border-input + dark:bg-input/30).
-                    className={cn(
-                        'w-full justify-start px-3 font-normal shadow-xs',
-                        'aria-invalid:border-destructive aria-invalid:ring-destructive/20',
-                        !selected && 'text-muted-foreground',
-                    )}
-                >
-                    <IconCalendar stroke={2} />
-                    {selected ? label.format(selected) : 'Chọn ngày'}
-                </Button>
-            </PopoverTrigger>
+            {/* Base UI không có `asChild`: nút mở popover truyền qua prop `render`. Base UI
+                merge props (onClick, aria-expanded, ref…) vào <Button>, Button spread tiếp
+                xuống <button> — React 19 cho `ref` đi thẳng qua props nên không cần forwardRef. */}
+            <PopoverTrigger
+                render={
+                    <Button
+                        type="button"
+                        id={id}
+                        aria-invalid={ariaInvalid}
+                        aria-describedby={ariaDescribedby}
+                        variant="outline"
+                        // Kéo cho khớp <Input>: canh trái, chữ thường, cùng shadow-xs. Nền/viền
+                        // đã do variant="outline" lo (border-input + dark:bg-input/30).
+                        className={cn(
+                            'w-full justify-start px-3 font-normal shadow-xs',
+                            'aria-invalid:border-destructive aria-invalid:ring-destructive/20',
+                            !selected && 'text-muted-foreground',
+                        )}
+                    >
+                        <IconCalendar stroke={2} />
+                        {selected ? label.format(selected) : 'Chọn ngày'}
+                    </Button>
+                }
+            />
             <PopoverContent className="w-auto p-0" align="start">
                 <Calendar
                     mode="single"

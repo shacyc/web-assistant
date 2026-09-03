@@ -17,7 +17,6 @@ BOT_SECRET="$(gen)"
 ADMIN_PASSWORD="dev-admin"
 ADMIN_AUTH_MODE="password"
 TELEGRAM_BOT_TOKEN=""
-TELEGRAM_CHAT_ID=""
 EOF
   echo "    BOT_SECRET local:"
   grep BOT_SECRET backend/.dev.vars

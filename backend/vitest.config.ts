@@ -35,8 +35,8 @@ export default defineConfig(async () => {
                         ADMIN_PASSWORD: 'test-admin-password',
                         ADMIN_AUTH_MODE: 'password',
                         TELEGRAM_BOT_TOKEN: 'test:token',
-                        TELEGRAM_CHAT_ID: '-100123',
-                        TELEGRAM_TOPIC_ID: '7',
+                        // Chat id / topic id không còn là secret — test tự seed vào bảng
+                        // `variables` + `countdown_config` (xem test/helpers.ts).
                         TEST_MIGRATIONS: migrations,
                     },
                 },

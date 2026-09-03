@@ -139,3 +139,38 @@ export const updateCountdown = (id: string, patch: Partial<CountdownInput>) =>
 export const deleteCountdown = (id: string) => request<{ ok: true }>('DELETE', `/admin/countdowns/${id}`);
 
 export const listLogs = () => request<{ logs: ExecutionLog[] }>('GET', '/admin/logs');
+
+/* ---------- Variables: kho key-value ---------- */
+
+export interface Variable {
+    key: string;
+    value: string;
+    // Drizzle mode:'timestamp' → Date → chuỗi ISO qua c.json(). Xem ghi chú ở CountdownEvent.
+    updatedAt: string | null;
+}
+
+export const listVariables = () => request<{ variables: Variable[] }>('GET', '/admin/variables');
+
+// Key có thể chứa khoảng trắng → phải encode. Upsert: có key thì cập nhật, chưa có thì tạo.
+export const putVariable = (key: string, value: string) =>
+    request<{ ok: true }>('PUT', `/admin/variables/${encodeURIComponent(key)}`, { value });
+
+export const deleteVariable = (key: string) =>
+    request<{ ok: true }>('DELETE', `/admin/variables/${encodeURIComponent(key)}`);
+
+export type ImportMode = 'merge' | 'replace';
+
+export const importVariables = (mode: ImportMode, variables: Record<string, string>) =>
+    request<{ ok: true; mode: ImportMode; count: number }>('POST', '/admin/variables/import', { mode, variables });
+
+/* ---------- Cấu hình countdown ---------- */
+
+export interface CountdownConfig {
+    chatIdKey: string | null;
+    topicIdKey: string | null;
+}
+
+export const getCountdownConfig = () => request<CountdownConfig>('GET', '/admin/countdown-config');
+
+export const putCountdownConfig = (cfg: CountdownConfig) =>
+    request<{ ok: true }>('PUT', '/admin/countdown-config', cfg);

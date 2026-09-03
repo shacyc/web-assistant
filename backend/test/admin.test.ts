@@ -29,7 +29,7 @@ describe('đăng nhập admin', () => {
 
 describe('cổng admin', () => {
     it('không cookie → 401 trên mọi endpoint admin', async () => {
-        for (const path of ['/api/admin/countdowns', '/api/admin/logs', '/api/admin/me']) {
+        for (const path of ['/api/admin/countdowns', '/api/admin/logs', '/api/admin/me', '/api/admin/variables', '/api/admin/countdown-config']) {
             expect((await req(path)).status).toBe(401);
         }
     });

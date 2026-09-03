@@ -21,6 +21,30 @@ export const countdownEvents = sqliteTable('countdown_events', {
     index('countdown_active_idx').on(table.enabled, table.startDate, table.endDate),
 ]);
 
+// Kho key-value dùng chung cho mọi tính năng. Không phải secret — đây là cấu hình admin
+// tự nhập và sửa được qua UI (chat id Telegram, topic id...). Trước đây các giá trị này
+// nằm trong secret của Worker; chuyển vào DB để admin đổi đích gửi mà không cần deploy.
+// Vẫn KHÔNG chứa thứ thật sự bí mật như bot token — cái đó vẫn là secret.
+export const variables = sqliteTable('variables', {
+    key: text('key').primaryKey(), // free-form, cho phép khoảng trắng: 'secretary telegram chat id'
+    // notNull nhưng cho phép chuỗi rỗng: "chưa đặt giá trị" khác với "không có key".
+    value: text('value').notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
+// Bảng một dòng (id luôn = 1). Mỗi tính năng cần cấu hình riêng thì thêm cột ở đây thay
+// vì rải cấu hình vào bảng `variables` — người dùng xoá nhầm một dòng key không được làm
+// hỏng mapping của countdown.
+export const countdownConfig = sqliteTable('countdown_config', {
+    id: integer('id').primaryKey(),
+    // Trỏ tới `variables.key`. Nullable = chưa cấu hình; countdown.notify sẽ báo lỗi rõ
+    // ràng thay vì gửi nhầm chỗ. Cố ý KHÔNG đặt foreign key: đổi tên key trong UI không
+    // nên bị chặn bởi ràng buộc, countdown tự kiểm lúc chạy.
+    chatIdKey: text('chat_id_key'),
+    topicIdKey: text('topic_id_key'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
 // Khi một AI bot tự ấn nút, đây là chỗ duy nhất trả lời được "hôm qua nó có chạy không,
 // gửi cái gì". Không có bảng này thì mọi lần debug đều phải đoán.
 export const executionLogs = sqliteTable('execution_logs', {

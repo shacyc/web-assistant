@@ -3,6 +3,8 @@ import { AdminGate } from '@/pages/admin/AdminGate';
 import { AdminLayout } from '@/components/layout/AdminLayout';
 import { CountdownListPage } from '@/pages/admin/CountdownListPage';
 import { CountdownFormPage } from '@/pages/admin/CountdownFormPage';
+import { VariablesPage } from '@/pages/admin/VariablesPage';
+import { ConfigPage } from '@/pages/admin/ConfigPage';
 import { LogsPage } from '@/pages/admin/LogsPage';
 import { BotPage } from '@/pages/bot/BotPage';
 
@@ -23,6 +25,8 @@ const router = createBrowserRouter([
             { index: true, element: <CountdownListPage /> },
             { path: 'countdowns/new', element: <CountdownFormPage /> },
             { path: 'countdowns/:id', element: <CountdownFormPage /> },
+            { path: 'config', element: <ConfigPage /> },
+            { path: 'variables', element: <VariablesPage /> },
             { path: 'logs', element: <LogsPage /> },
         ],
     },

@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, asc } from 'drizzle-orm';
+import type { BatchItem } from 'drizzle-orm/batch';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import * as schema from '../db/schema';
-import { countdownEvents, executionLogs } from '../db/schema';
+import { countdownEvents, executionLogs, variables, countdownConfig } from '../db/schema';
 import type { Env } from '../types';
 import { fail, invalidBody, serverError } from '../lib/respond';
 import { Body } from '../lib/validate';
@@ -60,6 +61,9 @@ adminRoutes.use('/countdowns', requireAdmin());
 adminRoutes.use('/countdowns/*', requireAdmin());
 adminRoutes.use('/logs', requireAdmin());
 adminRoutes.use('/me', requireAdmin());
+adminRoutes.use('/variables', requireAdmin());
+adminRoutes.use('/variables/*', requireAdmin());
+adminRoutes.use('/countdown-config', requireAdmin());
 
 adminRoutes.get('/me', (c) => c.json({ ok: true, mode: c.env.ADMIN_AUTH_MODE }));
 
@@ -163,4 +167,144 @@ adminRoutes.get('/logs', async (c) => {
     const db = drizzle(c.env.assistant_db, { schema });
     const rows = await db.select().from(executionLogs).orderBy(desc(executionLogs.createdAt)).limit(100);
     return c.json({ logs: rows });
+});
+
+/* ---------- Variables: kho key-value dùng chung ---------- */
+
+// Giới hạn để một lần ghi không ăn hết trần 10ms CPU của Workers Free.
+const KEY_MAX = 200;
+const VALUE_MAX = 4096;
+const IMPORT_MAX_ROWS = 500;
+
+adminRoutes.get('/variables', async (c) => {
+    const db = drizzle(c.env.assistant_db, { schema });
+    const rows = await db.select().from(variables).orderBy(asc(variables.key));
+    return c.json({ variables: rows });
+});
+
+adminRoutes.put('/variables/:key', async (c) => {
+    // Key có thể chứa khoảng trắng ('secretary telegram chat id'); client encodeURIComponent,
+    // Hono tự decode. Vẫn trim để '  x ' và 'x' không thành hai dòng khác nhau.
+    const key = c.req.param('key').trim();
+    if (!key) return fail(c, 400, 'INVALID_BODY', 'key không được rỗng', 'key');
+    if (key.length > KEY_MAX) return fail(c, 400, 'INVALID_BODY', `key dài quá ${KEY_MAX} ký tự`, 'key');
+
+    let raw: unknown;
+    try {
+        raw = await c.req.json();
+    } catch {
+        return fail(c, 400, 'INVALID_BODY', 'Body phải là JSON');
+    }
+    const f = new Body(raw);
+    const value = f.presentString('value', VALUE_MAX);
+    if (f.error) return invalidBody(c, f.error);
+
+    try {
+        const db = drizzle(c.env.assistant_db, { schema });
+        await db
+            .insert(variables)
+            .values({ key, value })
+            .onConflictDoUpdate({ target: variables.key, set: { value, updatedAt: new Date() } });
+        return c.json({ ok: true });
+    } catch (err) {
+        return serverError(c, err, 'admin.variables.put', { key });
+    }
+});
+
+adminRoutes.delete('/variables/:key', async (c) => {
+    const key = c.req.param('key');
+    try {
+        const db = drizzle(c.env.assistant_db, { schema });
+        await db.delete(variables).where(eq(variables.key, key));
+        return c.json({ ok: true });
+    } catch (err) {
+        return serverError(c, err, 'admin.variables.delete', { key });
+    }
+});
+
+adminRoutes.post('/variables/import', async (c) => {
+    let raw: unknown;
+    try {
+        raw = await c.req.json();
+    } catch {
+        return fail(c, 400, 'INVALID_BODY', 'Body phải là JSON');
+    }
+
+    const body = (raw ?? {}) as { mode?: unknown; variables?: unknown };
+    const mode = body.mode === 'replace' ? 'replace' : body.mode === 'merge' ? 'merge' : null;
+    if (!mode) return fail(c, 400, 'INVALID_BODY', "mode phải là 'merge' hoặc 'replace'", 'mode');
+
+    const data = body.variables;
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+        return fail(c, 400, 'INVALID_BODY', 'variables phải là object { "key": "value" }', 'variables');
+    }
+
+    // Kiểm sạch TOÀN BỘ trước khi ghi dòng nào: import nửa vời tệ hơn là từ chối cả gói.
+    const entries = Object.entries(data as Record<string, unknown>);
+    if (entries.length > IMPORT_MAX_ROWS) {
+        return fail(c, 400, 'TOO_LARGE', `Tối đa ${IMPORT_MAX_ROWS} dòng mỗi lần import`, 'variables');
+    }
+    for (const [k, v] of entries) {
+        if (!k.trim() || k.length > KEY_MAX) {
+            return fail(c, 400, 'INVALID_BODY', `key không hợp lệ: "${k.slice(0, 50)}"`, 'variables');
+        }
+        if (typeof v !== 'string' || v.length > VALUE_MAX) {
+            return fail(c, 400, 'INVALID_BODY', `value phải là chuỗi ≤ ${VALUE_MAX} ký tự (key "${k}")`, 'variables');
+        }
+    }
+
+    try {
+        const db = drizzle(c.env.assistant_db, { schema });
+        const now = new Date();
+        const stmts: BatchItem<'sqlite'>[] = [];
+        // replace: xoá sạch trước — người dùng đã chủ động chọn cách này ở UI.
+        if (mode === 'replace') stmts.push(db.delete(variables));
+        for (const [key, value] of entries as [string, string][]) {
+            stmts.push(
+                db
+                    .insert(variables)
+                    .values({ key: key.trim(), value })
+                    .onConflictDoUpdate({ target: variables.key, set: { value, updatedAt: now } }),
+            );
+        }
+        // db.batch chạy nguyên khối trong một round-trip: replace không bao giờ để lại
+        // bảng rỗng nếu insert lỗi. Nó đòi tuple non-empty nên phải chặn mảng rỗng.
+        if (stmts.length) await db.batch(stmts as [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]]);
+        return c.json({ ok: true, mode, count: entries.length });
+    } catch (err) {
+        return serverError(c, err, 'admin.variables.import', { mode });
+    }
+});
+
+/* ---------- Cấu hình countdown: trỏ tới key nào chứa chat id / topic id ---------- */
+
+adminRoutes.get('/countdown-config', async (c) => {
+    const db = drizzle(c.env.assistant_db, { schema });
+    const [row] = await db.select().from(countdownConfig).where(eq(countdownConfig.id, 1)).limit(1);
+    return c.json({ chatIdKey: row?.chatIdKey ?? null, topicIdKey: row?.topicIdKey ?? null });
+});
+
+adminRoutes.put('/countdown-config', async (c) => {
+    let raw: unknown;
+    try {
+        raw = await c.req.json();
+    } catch {
+        return fail(c, 400, 'INVALID_BODY', 'Body phải là JSON');
+    }
+    const f = new Body(raw);
+    // Bảng một dòng, không có khái niệm "giữ nguyên field": vắng mặt hay null đều = bỏ chọn.
+    const chatIdKey = f.optionalString('chatIdKey', KEY_MAX) ?? null;
+    const topicIdKey = f.optionalString('topicIdKey', KEY_MAX) ?? null;
+    if (f.error) return invalidBody(c, f.error);
+
+    try {
+        const db = drizzle(c.env.assistant_db, { schema });
+        await db
+            .insert(countdownConfig)
+            .values({ id: 1, chatIdKey, topicIdKey })
+            .onConflictDoUpdate({ target: countdownConfig.id, set: { chatIdKey, topicIdKey, updatedAt: new Date() } });
+        return c.json({ ok: true });
+    } catch (err) {
+        return serverError(c, err, 'admin.countdownConfig.put');
+    }
 });

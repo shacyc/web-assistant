@@ -6,9 +6,9 @@ export interface SendResult {
 /**
  * Gửi một tin nhắn qua Bot API.
  *
- * Token và chat_id đến từ secret của Worker, KHÔNG bao giờ từ frontend — nếu chat_id đi
- * qua request thì bất kỳ ai vào được trang bot cũng biến bot thành công cụ spam vào
- * nhóm tuỳ ý.
+ * `botToken` là secret của Worker. `chatId` đến từ bảng `variables` do admin đặt (qua
+ * cổng đã xác thực), KHÔNG bao giờ từ request của bot — nếu chat_id đi qua payload thì
+ * bất kỳ ai vào được trang bot cũng biến bot thành công cụ spam vào nhóm tuỳ ý.
  */
 export async function sendTelegram(
     botToken: string,
@@ -17,7 +17,7 @@ export async function sendTelegram(
     threadId?: string,
 ): Promise<SendResult> {
     if (!botToken || !chatId) {
-        return { ok: false, error: 'Chưa cấu hình TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID' };
+        return { ok: false, error: 'Thiếu bot token (secret) hoặc chat id (bảng variables)' };
     }
 
     const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
