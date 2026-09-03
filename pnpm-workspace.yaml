@@ -1,0 +1,11 @@
+packages:
+  - web
+  - backend
+
+# pnpm 11 chặn build script của dependency theo mặc định (chống supply-chain qua
+# postinstall). Hai gói dưới đây bắt buộc chạy build thật: esbuild tải binary native,
+# workerd tải runtime của Workers. Không cho phép thì vite/wrangler không chạy nổi.
+# Khai ở đây thay vì chạy `pnpm approve-builds` để mọi máy dựng lại y hệt nhau.
+allowBuilds:
+  esbuild: true
+  workerd: true

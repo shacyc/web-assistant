@@ -1,0 +1,47 @@
+{
+    "$schema": "node_modules/wrangler/config-schema.json",
+    "name": "web-assistant",
+    "main": "src/index.ts",
+    // Trần là phiên bản workerd mà wrangler đang ghim. Muốn nâng ngày này thì nâng
+    // wrangler trước, không thì deploy sẽ từ chối.
+    "compatibility_date": "2026-07-08",
+    "compatibility_flags": ["nodejs_compat"],
+
+    // Không để `wrangler deploy` xoá sạch vars/secrets đã set qua dashboard.
+    "keep_vars": true,
+    "observability": { "enabled": true, "head_sampling_rate": 1 },
+
+    // Một Worker serve cả SPA lẫn API. `run_worker_first` để /api/* không bị asset
+    // handler nuốt mất; mọi path khác rơi về index.html (SPA fallback).
+    "assets": {
+        "directory": "../web/dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/api/*"]
+    },
+
+    "d1_databases": [
+        {
+            "binding": "assistant_db",
+            "database_name": "web-assistant-db",
+            // Điền sau khi chạy: wrangler d1 create web-assistant-db
+            "database_id": "REPLACE_ME",
+            "migrations_dir": "drizzle"
+        }
+    ],
+
+    // Rate limiter dựng sẵn của Workers — không cần thêm hạ tầng.
+    // Hai cái bẫy: `period` CHỈ nhận 10 hoặc 60; bộ đếm là per-colo chứ không global,
+    // nên con số thực tế có thể cao hơn limit nếu request rải nhiều datacenter.
+    "ratelimits": [
+        { "name": "BOT_LOGIN_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
+        { "name": "BOT_RUN_LIMITER", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } },
+        { "name": "ADMIN_LOGIN_LIMITER", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } }
+    ],
+
+    // CHỈ những giá trị không phải bí mật. Secret nạp bằng `wrangler secret put`.
+    "vars": {
+        "TIMEZONE": "Asia/Ho_Chi_Minh",
+        "ADMIN_AUTH_MODE": "password"
+    }
+}

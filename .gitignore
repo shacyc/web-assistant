@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.wrangler/
+backend/.dev.vars
+.DS_Store
+*.log
+
+# `wrangler types` sinh file này từ wrangler.jsonc + .dev.vars của TỪNG máy.
+# Không theo git: máy chưa có .dev.vars sẽ sinh ra Env thiếu secret. Nguồn sự thật cho
+# kiểu binding là backend/src/types.ts viết tay.
+worker-configuration.d.ts

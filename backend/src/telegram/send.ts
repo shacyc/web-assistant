@@ -1,0 +1,36 @@
+export interface SendResult {
+    ok: boolean;
+    error?: string;
+}
+
+/**
+ * Gửi một tin nhắn qua Bot API.
+ *
+ * Token và chat_id đến từ secret của Worker, KHÔNG bao giờ từ frontend — nếu chat_id đi
+ * qua request thì bất kỳ ai vào được trang bot cũng biến bot thành công cụ spam vào
+ * nhóm tuỳ ý.
+ */
+export async function sendTelegram(botToken: string, chatId: string, text: string): Promise<SendResult> {
+    if (!botToken || !chatId) {
+        return { ok: false, error: 'Chưa cấu hình TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID' };
+    }
+
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            chat_id: chatId,
+            text,
+            parse_mode: 'MarkdownV2',
+            disable_web_page_preview: true,
+        }),
+    });
+
+    if (!res.ok) {
+        // Telegram trả JSON có `description` giải thích rất cụ thể (thường là lỗi escape
+        // MarkdownV2). Giữ nguyên câu đó, đừng nuốt — nó là manh mối debug duy nhất.
+        const body = await res.text().catch(() => '');
+        return { ok: false, error: `Telegram ${res.status}: ${body.slice(0, 300)}` };
+    }
+    return { ok: true };
+}

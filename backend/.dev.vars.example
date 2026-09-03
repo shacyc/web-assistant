@@ -1,0 +1,7 @@
+# scripts/init.sh sinh file .dev.vars thật với giá trị ngẫu nhiên. File này chỉ để tham chiếu.
+SESSION_SECRET=""
+BOT_SECRET=""
+ADMIN_PASSWORD="dev-admin"
+ADMIN_AUTH_MODE="password"
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_CHAT_ID=""
