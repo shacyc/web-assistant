@@ -28,6 +28,29 @@ export function today(timeZone: string, now: Date = new Date()): string {
     }).format(now);
 }
 
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * 'HH:MM' (24h) của *bây giờ* ở múi giờ đã cho. Dùng cho lịch chạy: so với
+ * `schedules.time_of_day` bằng phép so chuỗi.
+ *
+ * `hourCycle: 'h23'` chứ không phải `hour12: false`: option cũ có engine trả '24:00'
+ * lúc nửa đêm thay vì '00:00', lệch nguyên một ngày ở đúng ranh giới.
+ */
+export function hhmm(timeZone: string, now: Date = new Date()): string {
+    return new Intl.DateTimeFormat('en-GB', {
+        timeZone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).format(now);
+}
+
+/** 'HH:MM' 24h, zero-pad. '9:5' hay '24:00' đều trượt. */
+export function isValidHHMM(value: string): boolean {
+    return HHMM.test(value);
+}
+
 /**
  * Kiểm chuỗi vừa đúng định dạng vừa là ngày CÓ THẬT.
  *

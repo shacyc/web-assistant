@@ -15,6 +15,13 @@
       "when": 1788408763305,
       "tag": "0001_variables_config",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788429501037,
+      "tag": "0002_schedules",
+      "breakpoints": true
     }
   ]
 }

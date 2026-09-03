@@ -45,6 +45,35 @@ export const countdownConfig = sqliteTable('countdown_config', {
     updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
+// Lịch chạy tự động. Cloudflare chỉ có MỘT cron trigger (wrangler.jsonc), bắn mỗi 5
+// phút; nó không hardcode việc gì mà đọc bảng này rồi chạy job nào tới giờ. Đổi giờ /
+// bật tắt job = sửa dòng ở /admin/schedules, KHÔNG deploy. Cùng tinh thần registry của
+// trang /bot: cron là hạ tầng, "chạy gì lúc nào" là dữ liệu.
+export const schedules = sqliteTable('schedules', {
+    id: text('id').primaryKey(), // UUID
+    // Trỏ tới action trong registry (src/actions/registry.ts). KHÔNG foreign key — registry
+    // là code chứ không phải bảng. Handler `scheduled` ghi log 'error' rồi bỏ qua nếu id lạ.
+    actionId: text('action_id').notNull(),
+    // JSON các field truyền vào action.run(). '{}' = không field nào. Với countdown.notify
+    // đây là chỗ đặt {"dryRun": false}. Không parse được → coi như '{}'.
+    payload: text('payload').notNull().default('{}'),
+    // 'HH:MM' 24h theo TIMEZONE. So sánh chuỗi '<=' đúng vì luôn zero-pad (giống start_date).
+    timeOfDay: text('time_of_day').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    // 'YYYY-MM-DD' lần chạy gần nhất, thành công HAY lỗi. Đây là chốt "mỗi ngày một lần":
+    // handler bỏ qua dòng có last_run_date = hôm nay. Job lỗi KHÔNG tự thử lại trong ngày
+    // — đánh đổi lấy việc không bao giờ gửi trùng. null = chưa chạy bao giờ.
+    lastRunDate: text('last_run_date'),
+    lastRunAt: integer('last_run_at', { mode: 'timestamp' }),
+    lastRunStatus: text('last_run_status'), // 'ok' | 'error' | null
+    lastRunDetail: text('last_run_detail'), // tóm tắt kết quả gần nhất, cho màn Lịch đọc
+    createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+}, (table) => [
+    // Truy vấn nóng: mỗi 5 phút quét "job nào đang bật, tới giờ chưa".
+    index('schedules_due_idx').on(table.enabled, table.timeOfDay),
+]);
+
 // Khi một AI bot tự ấn nút, đây là chỗ duy nhất trả lời được "hôm qua nó có chạy không,
 // gửi cái gì". Không có bảng này thì mọi lần debug đều phải đoán.
 export const executionLogs = sqliteTable('execution_logs', {

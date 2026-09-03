@@ -175,3 +175,44 @@ export const getCountdownConfig = () => request<CountdownConfig>('GET', '/admin/
 
 export const putCountdownConfig = (cfg: CountdownConfig) =>
     request<{ ok: true }>('PUT', '/admin/countdown-config', cfg);
+
+/* ---------- Lịch chạy tự động ---------- */
+
+export interface Schedule {
+    id: string;
+    actionId: string;
+    // JSON đã stringify (bảng lưu TEXT). Form dựng lại từ đây; nơi khác chỉ hiển thị.
+    payload: string;
+    timeOfDay: string; // 'HH:MM' theo giờ VN
+    enabled: boolean;
+    lastRunDate: string | null; // 'YYYY-MM-DD'
+    lastRunAt: string | null; // ISO, xem ghi chú ở CountdownEvent
+    lastRunStatus: string | null; // 'ok' | 'error' | null
+    lastRunDetail: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+}
+
+export type ScheduleInput = {
+    actionId: string;
+    timeOfDay: string;
+    payload: Record<string, unknown>;
+    enabled: boolean;
+};
+
+// `actions` là cùng metadata trang /bot dùng — kèm sẵn để form dựng ô payload mà không
+// phải gọi thêm lượt (và không cần bot token).
+export const listSchedules = () =>
+    request<{ schedules: Schedule[]; actions: ActionMeta[] }>('GET', '/admin/schedules');
+
+export const createSchedule = (input: ScheduleInput) =>
+    request<{ id: string }>('POST', '/admin/schedules', input);
+
+export const updateSchedule = (id: string, patch: Partial<ScheduleInput>) =>
+    request<{ ok: true }>('PATCH', `/admin/schedules/${id}`, patch);
+
+export const deleteSchedule = (id: string) => request<{ ok: true }>('DELETE', `/admin/schedules/${id}`);
+
+// "Chạy ngay": luôn 200 kèm {ok, summary} — không đụng last_run_date, lịch tự động vẫn chạy.
+export const runSchedule = (id: string) =>
+    request<{ ok: boolean; summary: string }>('POST', `/admin/schedules/${id}/run`);

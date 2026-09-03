@@ -98,9 +98,10 @@ mới thì phải trả lời được nó tốn bao nhiêu CPU.
 `fetch('/api/...')` trong component.
 
 **Test phải chứng minh được là nó đang canh thứ gì đó.** Viết xong thì cố ý phá code (bỏ
-một dòng kiểm tra) và đếm xem mấy test đỏ. Không đỏ = test không canh gì cả. Bốn lớp
+một dòng kiểm tra) và đếm xem mấy test đỏ. Không đỏ = test không canh gì cả. Các lớp
 phòng thủ đã soi bằng cách này, mỗi lớp phá là có đỏ: `escapeMd` (3 đỏ) ·
-`secretEquals` (3 đỏ) · lọc `enabled` (1 đỏ) · nhánh `dryRun` (1 đỏ).
+`secretEquals` (3 đỏ) · lọc `enabled` (1 đỏ) · nhánh `dryRun` (1 đỏ) · chốt
+`isDue`/`last_run_date` của lịch (1 đỏ) · `UPDATE` có điều kiện chống cron chạy đôi (1 đỏ).
 
 **Chặn request ra ngoài trong test bằng `mockTelegram()` trong `test/helpers.ts`**, không
 phải `fetchMock` của `cloudflare:test` — pool 0.22 đã bỏ export đó (cùng với
@@ -136,6 +137,30 @@ export const myAction: BotAction = {
   async run(ctx, payload) { /* ... */ },
 };
 ```
+
+## Lịch chạy tự động (cron)
+
+Cloudflare chỉ có **một** cron trigger (`wrangler.jsonc` → `triggers.crons`), bắn mỗi 5
+phút, **giờ UTC**. Handler `scheduled` trong `src/index.ts` không hardcode việc gì: nó
+đọc bảng `schedules` rồi chạy action nào tới giờ. Cùng tinh thần registry — cron là hạ
+tầng, "chạy gì lúc nào" là dữ liệu admin sửa qua `/admin/schedules`, **không deploy**.
+
+- `time_of_day` là `'HH:MM'` theo `TIMEZONE` (không phải UTC — chỉ biểu thức cron mới UTC).
+- **Mỗi ngày một lần**: handler bỏ qua dòng có `last_run_date` = hôm nay. Job lỗi **không
+  tự thử lại** trong ngày (admin thấy lỗi ở màn Lịch + Nhật ký) — đổi lấy việc không bao
+  giờ gửi trùng. Nhịp cron bị bỏ lỡ thì nhịp sau vẫn vớt lại được (điều kiện là
+  `time_of_day <= giờ hiện tại`, không phải cửa sổ hẹp quanh đúng phút).
+- Chốt chống chạy đôi khi hai lần cron chồng nhau: `UPDATE schedules SET last_run_date =
+  hôm nay WHERE ... AND last_run_date chưa = hôm nay`, rồi kiểm `meta.changes`.
+- `POST /api/admin/schedules/:id/run` chạy job ngay để thử, **cố ý không đụng**
+  `last_run_date` — lịch tự động vẫn chạy đúng giờ sau đó.
+- Cron và nút "Chạy ngay" đi qua `actions/run.ts` (`runActionById`) — ghi `execution_logs`
+  với tiền tố `[cron]` / `[chạy tay]`. Đường `/api/bot` **không** dùng chung hàm này: nó
+  có rate limit + xử lý lỗi riêng.
+
+Test handler `scheduled` bằng `createScheduledController` + `worker.scheduled(...)` (xem
+`test/schedules.test.ts`), không qua `SELF`. Local: `wrangler dev` rồi
+`curl localhost:8787/cdn-cgi/local/scheduled`.
 
 ## Secret
 

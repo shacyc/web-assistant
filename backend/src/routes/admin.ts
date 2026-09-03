@@ -4,12 +4,15 @@ import { eq, desc, asc } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import * as schema from '../db/schema';
-import { countdownEvents, executionLogs, variables, countdownConfig } from '../db/schema';
+import { countdownEvents, executionLogs, variables, countdownConfig, schedules } from '../db/schema';
 import type { Env } from '../types';
 import { fail, invalidBody, serverError } from '../lib/respond';
 import { Body } from '../lib/validate';
 import { issue, secretEquals } from '../auth/session';
 import { requireAdmin } from '../auth/guards';
+import { getAction, listActions } from '../actions/registry';
+import { runActionById } from '../actions/run';
+import { parsePayload } from '../lib/schedule';
 
 export const adminRoutes = new Hono<Env>();
 
@@ -64,6 +67,8 @@ adminRoutes.use('/me', requireAdmin());
 adminRoutes.use('/variables', requireAdmin());
 adminRoutes.use('/variables/*', requireAdmin());
 adminRoutes.use('/countdown-config', requireAdmin());
+adminRoutes.use('/schedules', requireAdmin());
+adminRoutes.use('/schedules/*', requireAdmin());
 
 adminRoutes.get('/me', (c) => c.json({ ok: true, mode: c.env.ADMIN_AUTH_MODE }));
 
@@ -318,5 +323,121 @@ adminRoutes.put('/countdown-config', async (c) => {
         return c.json({ ok: true });
     } catch (err) {
         return serverError(c, err, 'admin.countdownConfig.put');
+    }
+});
+
+/* ---------- Lịch chạy tự động: bảng cron trong DB ---------- */
+
+// payload là JSON của các field truyền vào action. Trần để một dòng lịch không nuốt hết
+// 10ms CPU lúc handler `scheduled` parse nó mỗi 5 phút.
+const PAYLOAD_MAX = 2000;
+
+adminRoutes.get('/schedules', async (c) => {
+    const db = drizzle(c.env.assistant_db, { schema });
+    const rows = await db.select().from(schedules).orderBy(asc(schedules.timeOfDay));
+    // Kèm metadata action để màn Lịch dựng form payload + đổi id sang nhãn mà không phải
+    // gọi thêm một lượt. Cùng nguồn với trang /bot (listActions), chỉ khác đường auth.
+    return c.json({ schedules: rows, actions: listActions() });
+});
+
+adminRoutes.post('/schedules', async (c) => {
+    let raw: unknown;
+    try {
+        raw = await c.req.json();
+    } catch {
+        return fail(c, 400, 'INVALID_BODY', 'Body phải là JSON');
+    }
+
+    const f = new Body(raw);
+    const actionId = f.requiredString('actionId', 100);
+    const timeOfDay = f.requiredTime('timeOfDay');
+    const payload = f.optionalJsonObjectString('payload', PAYLOAD_MAX);
+    const enabled = f.optionalBoolean('enabled');
+
+    // actionId phải trỏ tới một action CÓ THẬT trong registry: một dòng lịch gõ sai id
+    // chỉ lộ ra lúc 4h sáng khi cron bỏ qua nó thì quá muộn.
+    if (!f.error && !getAction(actionId)) f.reject('actionId', 'không có trong registry');
+    if (f.error) return invalidBody(c, f.error);
+
+    try {
+        const db = drizzle(c.env.assistant_db, { schema });
+        const id = crypto.randomUUID();
+        await db.insert(schedules).values({
+            id,
+            actionId,
+            timeOfDay,
+            payload: payload ?? '{}',
+            enabled: enabled ?? true,
+        });
+        return c.json({ id }, 201);
+    } catch (err) {
+        return serverError(c, err, 'admin.schedule.create');
+    }
+});
+
+adminRoutes.patch('/schedules/:id', async (c) => {
+    const id = c.req.param('id');
+    let raw: unknown;
+    try {
+        raw = await c.req.json();
+    } catch {
+        return fail(c, 400, 'INVALID_BODY', 'Body phải là JSON');
+    }
+
+    const db = drizzle(c.env.assistant_db, { schema });
+    const [existing] = await db.select().from(schedules).where(eq(schedules.id, id)).limit(1);
+    if (!existing) return fail(c, 404, 'NOT_FOUND', 'Không có lịch này');
+
+    const f = new Body(raw);
+    // `undefined` = không gửi = giữ nguyên (drizzle bỏ qua undefined trong .set()).
+    const hasActionId = raw !== null && typeof raw === 'object' && 'actionId' in raw;
+    const patch = {
+        actionId: hasActionId ? f.requiredString('actionId', 100) : undefined,
+        timeOfDay: f.optionalTime('timeOfDay'),
+        payload: f.optionalJsonObjectString('payload', PAYLOAD_MAX),
+        enabled: f.optionalBoolean('enabled'),
+    };
+    if (!f.error && patch.actionId !== undefined && !getAction(patch.actionId)) {
+        f.reject('actionId', 'không có trong registry');
+    }
+    if (f.error) return invalidBody(c, f.error);
+
+    try {
+        await db
+            .update(schedules)
+            .set({ ...patch, updatedAt: new Date() })
+            .where(eq(schedules.id, id));
+        return c.json({ ok: true });
+    } catch (err) {
+        return serverError(c, err, 'admin.schedule.update', { id });
+    }
+});
+
+adminRoutes.delete('/schedules/:id', async (c) => {
+    const id = c.req.param('id');
+    try {
+        const db = drizzle(c.env.assistant_db, { schema });
+        await db.delete(schedules).where(eq(schedules.id, id));
+        return c.json({ ok: true });
+    } catch (err) {
+        return serverError(c, err, 'admin.schedule.delete', { id });
+    }
+});
+
+// Chạy job NGAY, bỏ qua giờ/enabled/last_run. Cố ý KHÔNG đụng last_run_date: đây là nút
+// để thử, không phải để "đánh dấu hôm nay đã gửi" — chạy tay xong thì lịch tự động vẫn
+// chạy đúng giờ như thường. Luôn trả 200 kèm {ok, summary} để UI hiện kết quả thay vì
+// nuốt vào ApiError.
+adminRoutes.post('/schedules/:id/run', async (c) => {
+    const id = c.req.param('id');
+    const db = drizzle(c.env.assistant_db, { schema });
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, id)).limit(1);
+    if (!row) return fail(c, 404, 'NOT_FOUND', 'Không có lịch này');
+
+    try {
+        const outcome = await runActionById(db, c.env, row.actionId, parsePayload(row.payload), '[chạy tay]');
+        return c.json(outcome);
+    } catch (err) {
+        return serverError(c, err, 'admin.schedule.run', { id });
     }
 });

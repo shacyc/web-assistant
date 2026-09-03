@@ -14,7 +14,7 @@
  *   dùng: client là app của chính mình, và nó không hiển thị danh sách lỗi.
  */
 
-import { isValidDate } from './dates';
+import { isValidDate, isValidHHMM } from './dates';
 
 export interface FieldError {
     field: string;
@@ -136,6 +136,46 @@ export class Body {
             return undefined;
         }
         return v;
+    }
+
+    /** Giờ trong ngày 'HH:MM' 24h, bắt buộc. */
+    requiredTime(name: string): string {
+        const v = this.raw[name];
+        if (typeof v !== 'string' || !isValidHHMM(v)) {
+            this.fail(name, 'phải là giờ HH:MM 24h');
+            return '';
+        }
+        return v;
+    }
+
+    optionalTime(name: string): string | undefined {
+        if (!this.present(name)) return undefined;
+        const v = this.raw[name];
+        if (typeof v !== 'string' || !isValidHHMM(v)) {
+            this.fail(name, 'phải là giờ HH:MM 24h');
+            return undefined;
+        }
+        return v;
+    }
+
+    /**
+     * Object JSON tuỳ chọn, trả về chuỗi đã `JSON.stringify` để ghi thẳng vào cột TEXT.
+     * Không gửi = `undefined` (giữ nguyên khi PATCH). Gửi thứ không phải object (mảng,
+     * số, null) = lỗi: payload của một job phải là `{ field: value }`.
+     */
+    optionalJsonObjectString(name: string, max: number): string | undefined {
+        if (this.raw[name] === undefined) return undefined;
+        const v = this.raw[name];
+        if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+            this.fail(name, 'phải là object JSON');
+            return undefined;
+        }
+        const s = JSON.stringify(v);
+        if (s.length > max) {
+            this.fail(name, `dài quá ${max} ký tự`);
+            return undefined;
+        }
+        return s;
     }
 
     /** Ghi một lỗi nghiệp vụ vào cùng cơ chế, để call site chỉ kiểm `.error` một lần. */

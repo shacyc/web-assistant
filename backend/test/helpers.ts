@@ -22,6 +22,7 @@ beforeEach(async () => {
     await env.assistant_db.exec('DELETE FROM execution_logs');
     await env.assistant_db.exec('DELETE FROM variables');
     await env.assistant_db.exec('DELETE FROM countdown_config');
+    await env.assistant_db.exec('DELETE FROM schedules');
 });
 
 export { SELF };
@@ -133,6 +134,31 @@ export async function seedCountdownConfig(
         .bind(chatIdKey, topicIdKey)
         .run();
     return { chatIdKey, topicIdKey };
+}
+
+export interface ScheduleOverrides {
+    id?: string;
+    actionId?: string;
+    payload?: string;
+    timeOfDay?: string;
+    enabled?: number;
+    lastRunDate?: string | null;
+}
+
+export async function seedSchedule(over: ScheduleOverrides = {}) {
+    const row = {
+        id: over.id ?? crypto.randomUUID(),
+        actionId: over.actionId ?? 'countdown.notify',
+        payload: over.payload ?? '{}',
+        timeOfDay: over.timeOfDay ?? '00:00',
+        enabled: over.enabled ?? 1,
+        lastRunDate: over.lastRunDate ?? null,
+    };
+    await env.assistant_db
+        .prepare('INSERT INTO schedules (id, action_id, payload, time_of_day, enabled, last_run_date) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(row.id, row.actionId, row.payload, row.timeOfDay, row.enabled, row.lastRunDate)
+        .run();
+    return row;
 }
 
 export async function seedEvent(over: SeedOverrides = {}) {

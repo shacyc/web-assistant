@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
+import { and, eq, isNull, lte, ne, or } from 'drizzle-orm';
 import * as schema from './db/schema';
-import { executionLogs } from './db/schema';
+import { schedules } from './db/schema';
 import type { Bindings, Env } from './types';
 import { fail, serverError } from './lib/respond';
-import { today } from './lib/dates';
-import { countdownNotify } from './actions/countdownNotify';
+import { hhmm, today } from './lib/dates';
+import { isDue, parsePayload } from './lib/schedule';
+import { runActionById } from './actions/run';
 import { botRoutes } from './routes/bot';
 import { adminRoutes } from './routes/admin';
 
@@ -35,38 +37,58 @@ app.onError((err, c) => serverError(c, err, 'unhandled', { path: c.req.path }));
 export default {
     fetch: app.fetch,
 
-    // Cron gọi THẲNG action mà bot vẫn bấm — không đi vòng qua HTTP + session token.
-    // Kết quả ghi vào cùng bảng execution_logs với tiền tố [cron] để admin phân biệt
-    // được lần chạy tự động với lần bot bấm tay. Lịch: triggers.crons trong wrangler.jsonc.
+    /**
+     * Cron thật (wrangler.jsonc `triggers.crons`) bắn mỗi 5 phút, GIỜ UTC. Nó KHÔNG
+     * hardcode việc gì: đọc bảng `schedules` — admin sửa qua /admin/schedules mà không
+     * cần deploy — rồi chạy job nào tới giờ mà hôm nay chưa chạy.
+     *
+     * Mỗi lần bắn là 1 request tính vào hạn mức, và handler này có 10ms CPU trên Free.
+     * Vì vậy: lọc "đang bật + đã tới giờ" ngay trong SQL, phần còn lại chạy tuần tự và
+     * nhẹ (query D1 + fetch Telegram là thời gian mạng, không phải CPU).
+     */
     async scheduled(_event: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
         const db = drizzle(env.assistant_db, { schema });
+        const todayStr = today(env.TIMEZONE);
+        const nowHHMM = hhmm(env.TIMEZONE);
 
-        let summary: string;
-        let status: 'ok' | 'error';
-        try {
-            const result = await countdownNotify.run(
-                { db, env, today: today(env.TIMEZONE) },
-                {},
-            );
-            summary = result.summary;
-            status = result.ok ? 'ok' : 'error';
-            console.log('[cron] countdown.notify:', summary);
-        } catch (err) {
-            summary = err instanceof Error ? err.message : 'unknown';
-            status = 'error';
-            console.error('[cron] countdown.notify threw:', summary);
+        const candidates = await db
+            .select()
+            .from(schedules)
+            .where(and(eq(schedules.enabled, true), lte(schedules.timeOfDay, nowHHMM)));
+
+        for (const row of candidates) {
+            // `isDue` lặp lại điều kiện SQL + thêm chốt "chưa chạy hôm nay". Giữ cả hai:
+            // SQL để không kéo về những dòng chắc chắn không chạy, `isDue` để logic đầy
+            // đủ nằm một chỗ test được.
+            if (!isDue(row, todayStr, nowHHMM)) continue;
+
+            // Chốt quyền chạy bằng UPDATE có điều kiện: hai lần cron chồng nhau (hiếm,
+            // nhưng có thể) thì chỉ một cái đổi được last_run_date sang hôm nay; cái kia
+            // thấy changes = 0 và bỏ qua. Ghi last_run_date TRƯỚC khi chạy nên job lỗi
+            // không tự thử lại trong ngày — đổi lấy việc không bao giờ gửi trùng.
+            const claim = await db
+                .update(schedules)
+                .set({ lastRunDate: todayStr, updatedAt: new Date() })
+                .where(
+                    and(
+                        eq(schedules.id, row.id),
+                        or(isNull(schedules.lastRunDate), ne(schedules.lastRunDate, todayStr)),
+                    ),
+                );
+            if ((claim.meta?.changes ?? 0) === 0) continue;
+
+            const outcome = await runActionById(db, env, row.actionId, parsePayload(row.payload), '[cron]');
+            console.log(`[cron] ${row.actionId} @ ${row.timeOfDay}:`, outcome.summary);
+
+            await db
+                .update(schedules)
+                .set({
+                    lastRunAt: new Date(),
+                    lastRunStatus: outcome.ok ? 'ok' : 'error',
+                    lastRunDetail: outcome.summary.slice(0, 500),
+                    updatedAt: new Date(),
+                })
+                .where(eq(schedules.id, row.id));
         }
-
-        // Ghi log là best-effort: tin nhắn có thể đã gửi đi rồi, đừng để lỗi insert
-        // che mất điều đó.
-        await db
-            .insert(executionLogs)
-            .values({
-                id: crypto.randomUUID(),
-                actionId: 'countdown.notify',
-                status,
-                detail: `[cron] ${summary}`.slice(0, 1000),
-            })
-            .catch((e) => console.error('[cron] log.insert', e));
     },
 };
