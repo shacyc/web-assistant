@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { IconLogin2 } from '@tabler/icons-react';
 import { adminLogin, adminMe, ApiError } from '@/lib/apiClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,12 +16,17 @@ export function AdminGate({ children }: { children: ReactNode }) {
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const errorRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         adminMe()
             .then(() => setState('in'))
             .catch(() => setState('out'));
     }, []);
+
+    useEffect(() => {
+        if (error) errorRef.current?.focus();
+    }, [error]);
 
     async function submit(e: FormEvent) {
         e.preventDefault();
@@ -36,7 +42,12 @@ export function AdminGate({ children }: { children: ReactNode }) {
         }
     }
 
-    if (state === 'checking') return <p className="text-muted-foreground p-8 text-sm">Đang kiểm tra phiên…</p>;
+    if (state === 'checking')
+        return (
+            <p role="status" className="text-muted-foreground p-8 text-sm">
+                Đang kiểm tra phiên…
+            </p>
+        );
     if (state === 'in') return <>{children}</>;
 
     return (
@@ -61,11 +72,12 @@ export function AdminGate({ children }: { children: ReactNode }) {
                             />
                         </div>
                         {error && (
-                            <Alert variant="destructive">
+                            <Alert ref={errorRef} tabIndex={-1} variant="destructive">
                                 <AlertDescription>{error}</AlertDescription>
                             </Alert>
                         )}
                         <Button type="submit" disabled={busy || !password}>
+                            <IconLogin2 stroke={2} />
                             {busy ? 'Đang vào…' : 'Đăng nhập'}
                         </Button>
                     </form>

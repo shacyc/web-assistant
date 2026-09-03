@@ -1,19 +1,31 @@
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { AdminGate } from '@/pages/admin/AdminGate';
+import { AdminLayout } from '@/components/layout/AdminLayout';
 import { CountdownListPage } from '@/pages/admin/CountdownListPage';
 import { CountdownFormPage } from '@/pages/admin/CountdownFormPage';
 import { LogsPage } from '@/pages/admin/LogsPage';
 import { BotPage } from '@/pages/bot/BotPage';
 
-// Một file route, không lazy — cả app chỉ có năm màn hình.
+// Một file route, không lazy — cả app chỉ có vài màn hình.
 const router = createBrowserRouter([
     { path: '/', element: <Navigate to="/admin" replace /> },
 
-    // AdminGate chỉ là lớp trải nghiệm. Cổng thật là requireAdmin() trên worker.
-    { path: '/admin', element: <AdminGate><CountdownListPage /></AdminGate> },
-    { path: '/admin/countdowns/new', element: <AdminGate><CountdownFormPage /></AdminGate> },
-    { path: '/admin/countdowns/:id', element: <AdminGate><CountdownFormPage /></AdminGate> },
-    { path: '/admin/logs', element: <AdminGate><LogsPage /></AdminGate> },
+    // AdminGate chỉ là lớp trải nghiệm — cổng thật là requireAdmin() trên worker.
+    // AdminLayout dựng sidebar + <Outlet/>; mỗi màn admin là một route con bên dưới.
+    {
+        path: '/admin',
+        element: (
+            <AdminGate>
+                <AdminLayout />
+            </AdminGate>
+        ),
+        children: [
+            { index: true, element: <CountdownListPage /> },
+            { path: 'countdowns/new', element: <CountdownFormPage /> },
+            { path: 'countdowns/:id', element: <CountdownFormPage /> },
+            { path: 'logs', element: <LogsPage /> },
+        ],
+    },
 
     { path: '/bot', element: <BotPage /> },
 ]);

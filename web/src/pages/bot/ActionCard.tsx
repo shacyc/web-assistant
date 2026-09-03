@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react';
+import { IconPlayerPlay } from '@tabler/icons-react';
 import { runBotAction, ApiError, type ActionMeta, type ActionResult } from '@/lib/apiClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 /**
  * Render một action TỪ metadata của backend — không hardcode tính năng nào. Thêm action
@@ -34,6 +36,8 @@ export function ActionCard({ action }: { action: ActionMeta }) {
         }
     }
 
+    const status = error ? 'error' : result?.ok ? 'ok' : 'failed';
+
     return (
         <Card>
             <CardHeader>
@@ -47,12 +51,12 @@ export function ActionCard({ action }: { action: ActionMeta }) {
                         if (f.type === 'boolean') {
                             return (
                                 <div key={f.name} className="flex flex-col gap-1">
-                                    <Label htmlFor={id}>
+                                    <Label htmlFor={id} className="cursor-pointer">
                                         <input
                                             id={id}
                                             name={f.name}
                                             type="checkbox"
-                                            className="size-4"
+                                            className="size-4 cursor-pointer accent-primary"
                                             checked={Boolean(values[f.name])}
                                             onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.checked }))}
                                         />
@@ -79,17 +83,24 @@ export function ActionCard({ action }: { action: ActionMeta }) {
                     })}
 
                     <Button type="submit" data-action={action.id} disabled={busy}>
+                        <IconPlayerPlay stroke={2} />
                         {busy ? 'Đang chạy…' : 'Thực thi'}
                     </Button>
                 </form>
 
-                {/* Bot đọc đúng vùng này để biết kết quả. Giữ nguyên data-testid. */}
+                {/* Bot đọc đúng vùng này để biết kết quả. Giữ nguyên data-testid.
+                   aria-live để người vận hành dùng screen reader biết kết quả vừa hiện;
+                   viền trái theo status để người nhìn phân biệt ok / lỗi ngay. */}
                 {(result || error) && (
                     <pre
                         data-testid="action-result"
                         data-action-id={action.id}
-                        data-status={error ? 'error' : result?.ok ? 'ok' : 'failed'}
-                        className="bg-muted mt-4 max-h-96 overflow-auto rounded-md p-3 text-xs whitespace-pre-wrap"
+                        data-status={status}
+                        aria-live="polite"
+                        className={cn(
+                            'bg-muted mt-4 max-h-96 overflow-auto rounded-md border-l-4 p-3 text-xs whitespace-pre-wrap',
+                            status === 'ok' ? 'border-l-primary' : 'border-l-destructive',
+                        )}
                     >
                         {error ?? result?.summary}
                     </pre>

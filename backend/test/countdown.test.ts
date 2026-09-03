@@ -71,6 +71,9 @@ describe('countdown.notify', () => {
 
         expect(tg.calls).toHaveLength(1);
         expect(tg.calls[0].chat_id).toBe(env.TELEGRAM_CHAT_ID);
+        // Có TELEGRAM_TOPIC_ID → phải kèm message_thread_id (số, không phải chuỗi),
+        // nếu không tin nhắn rơi vào "General". Bỏ spread trong send.ts là test này đỏ.
+        expect(tg.calls[0].message_thread_id).toBe(Number(env.TELEGRAM_TOPIC_ID));
         expect(tg.calls[0].parse_mode).toBe('MarkdownV2');
         expect(tg.calls[0].text).toContain('Một');
         expect(tg.calls[0].text).toContain('Hai');

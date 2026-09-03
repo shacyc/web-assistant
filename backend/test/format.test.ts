@@ -51,6 +51,8 @@ describe('formatCountdownMessage', () => {
         expect(msg).toContain('Hai');
         expect(msg).toContain('Còn 12 ngày');
         expect(msg).toContain('đã qua 18/30');
+        // % mỗi ngày, dấu chấm thập phân đã được escape cho MarkdownV2.
+        expect(msg).toContain('Mỗi ngày trôi qua mất \\~3\\.33%');
     });
 
     it('escape tên sự kiện chứa ký tự Markdown', () => {

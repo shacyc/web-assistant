@@ -44,6 +44,8 @@ describe('computeCountdown', () => {
     it('giữa chừng: chia đúng đã qua / còn lại', () => {
         const cd = computeCountdown('2026-09-01', '2026-10-01', '2026-09-19')!;
         expect(cd).toMatchObject({ totalDays: 30, elapsedDays: 18, remainingDays: 12, percent: 60, phase: 'active' });
+        // 100 / 30 = 3.333… → giữ 2 số lẻ. Làm tròn về số nguyên ở đây là mất ý nghĩa.
+        expect(cd.perDayPercent).toBe(3.33);
     });
 
     it('đúng ngày bắt đầu: elapsed = 0, vẫn active', () => {
@@ -65,6 +67,7 @@ describe('computeCountdown', () => {
         expect(cd.totalDays).toBe(0);
         expect(Number.isFinite(cd.percent)).toBe(true);
         expect(cd.percent).toBe(100);
+        expect(cd.perDayPercent).toBe(100); // đúng một ngày = trọn chặng
         expect(cd.phase).toBe('active');
     });
 

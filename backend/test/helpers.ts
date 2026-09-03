@@ -46,6 +46,7 @@ export interface TelegramCall {
     chat_id: string;
     text: string;
     parse_mode: string;
+    message_thread_id?: number;
 }
 
 export interface TelegramMock {

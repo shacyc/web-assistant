@@ -59,6 +59,7 @@ export interface Countdown {
     elapsedDays: number;
     remainingDays: number;
     percent: number; // 0..100, đã làm tròn
+    perDayPercent: number; // mỗi ngày trôi qua chiếm bao nhiêu % toàn chặng, làm tròn 2 số lẻ
     phase: Phase;
 }
 
@@ -86,7 +87,12 @@ export function computeCountdown(startDate: string, endDate: string, todayDate: 
         ? (phase === 'pending' ? 0 : 100)
         : Math.round((elapsedDays / totalDays) * 100);
 
-    return { totalDays, elapsedDays, remainingDays, percent, phase };
+    // Mỗi ngày trôi qua "ăn" bao nhiêu phần trăm toàn bộ chặng. Không làm tròn về số
+    // nguyên như `percent`: chặng dài hơn ~150 ngày sẽ ra 0% và mất hết ý nghĩa. Giữ 2
+    // số lẻ. totalDays === 0 thì đúng một ngày là trọn vẹn 100%.
+    const perDayPercent = totalDays === 0 ? 100 : Math.round((100 / totalDays) * 100) / 100;
+
+    return { totalDays, elapsedDays, remainingDays, percent, perDayPercent, phase };
 }
 
 /** Thanh tiến độ bằng ký tự khối — Telegram không render được HTML/SVG. */

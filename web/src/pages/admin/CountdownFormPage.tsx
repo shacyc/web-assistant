@@ -1,5 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { IconDeviceFloppy, IconX } from '@tabler/icons-react';
 import {
     createCountdown,
     updateCountdown,
@@ -11,10 +12,20 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { DatePicker } from '@/components/DatePicker';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 const empty: CountdownInput = { event: '', description: null, startDate: '', endDate: '', enabled: true };
+
+// Dấu bắt buộc. aria-hidden: <input required> đã báo cho screen reader; ô ngày dùng
+// DatePicker (<button>) không có required native nên đây chỉ là gợi ý thị giác.
+const Req = () => (
+    <span aria-hidden="true" className="text-destructive">
+        {' '}
+        *
+    </span>
+);
 
 export function CountdownFormPage() {
     const { id } = useParams();
@@ -24,7 +35,16 @@ export function CountdownFormPage() {
     const [form, setForm] = useState<CountdownInput>(empty);
     const [loading, setLoading] = useState(editing);
     const [error, setError] = useState<string | null>(null);
+    // Lỗi ngày tách riêng: hiển thị ngay dưới cụm DatePicker và gắn vào field bằng
+    // aria-describedby, không dồn hết vào Alert cuối form.
+    const [dateError, setDateError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const errorRef = useRef<HTMLDivElement>(null);
+
+    // Submit hỏng ở cuối form dài — kéo focus về Alert để người dùng thấy ngay.
+    useEffect(() => {
+        if (error) errorRef.current?.focus();
+    }, [error]);
 
     useEffect(() => {
         if (!editing) return;
@@ -51,8 +71,16 @@ export function CountdownFormPage() {
 
     async function submit(e: FormEvent) {
         e.preventDefault();
+        // DatePicker là <button>, không có validation `required` của trình duyệt như
+        // <input type="date"> cũ — chặn tay ở đây trước khi gọi API.
+        if (!form.startDate || !form.endDate) {
+            setDateError('Chọn đủ ngày bắt đầu và kết thúc');
+            document.getElementById(form.startDate ? 'endDate' : 'startDate')?.focus();
+            return;
+        }
         setBusy(true);
         setError(null);
+        setDateError(null);
         try {
             if (editing) await updateCountdown(id!, form);
             else await createCountdown(form);
@@ -64,7 +92,12 @@ export function CountdownFormPage() {
         }
     }
 
-    if (loading) return <p className="text-muted-foreground p-8 text-sm">Đang tải…</p>;
+    if (loading)
+        return (
+            <p role="status" className="text-muted-foreground p-8 text-sm">
+                Đang tải…
+            </p>
+        );
 
     return (
         <div className="mx-auto max-w-xl px-4 py-8">
@@ -75,7 +108,12 @@ export function CountdownFormPage() {
                 <CardContent>
                     <form onSubmit={submit} className="flex flex-col gap-4">
                         <div className="flex flex-col gap-2">
-                            <Label htmlFor="event">Tên sự kiện</Label>
+                            <Label htmlFor="event">
+                                <span>
+                                    Tên sự kiện
+                                    <Req />
+                                </span>
+                            </Label>
                             <Input
                                 id="event"
                                 name="event"
@@ -97,55 +135,85 @@ export function CountdownFormPage() {
                             />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="flex flex-col gap-2">
-                                <Label htmlFor="startDate">Ngày bắt đầu</Label>
-                                <Input
-                                    id="startDate"
-                                    name="startDate"
-                                    type="date"
-                                    value={form.startDate}
-                                    onChange={(e) => setForm({ ...form, startDate: e.target.value })}
-                                    required
-                                />
+                        <div>
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                <div className="flex flex-col gap-2">
+                                    <Label htmlFor="startDate">
+                                        <span>
+                                            Ngày bắt đầu
+                                            <Req />
+                                        </span>
+                                    </Label>
+                                    <DatePicker
+                                        id="startDate"
+                                        value={form.startDate}
+                                        onChange={(v) => {
+                                            setForm({ ...form, startDate: v });
+                                            setDateError(null);
+                                        }}
+                                        aria-invalid={Boolean(dateError) && !form.startDate}
+                                        aria-describedby={dateError ? 'date-error' : undefined}
+                                    />
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                    <Label htmlFor="endDate">
+                                        <span>
+                                            Ngày kết thúc
+                                            <Req />
+                                        </span>
+                                    </Label>
+                                    <DatePicker
+                                        id="endDate"
+                                        value={form.endDate}
+                                        min={form.startDate || undefined}
+                                        onChange={(v) => {
+                                            setForm({ ...form, endDate: v });
+                                            setDateError(null);
+                                        }}
+                                        aria-invalid={Boolean(dateError) && !form.endDate}
+                                        aria-describedby={dateError ? 'date-error' : undefined}
+                                    />
+                                </div>
                             </div>
-                            <div className="flex flex-col gap-2">
-                                <Label htmlFor="endDate">Ngày kết thúc</Label>
-                                <Input
-                                    id="endDate"
-                                    name="endDate"
-                                    type="date"
-                                    value={form.endDate}
-                                    min={form.startDate || undefined}
-                                    onChange={(e) => setForm({ ...form, endDate: e.target.value })}
-                                    required
-                                />
-                            </div>
+                            {dateError && (
+                                <p id="date-error" role="alert" className="text-destructive mt-2 text-sm">
+                                    {dateError}
+                                </p>
+                            )}
                         </div>
 
-                        <Label htmlFor="enabled">
+                        {/* Bọc trong ô có viền như các field khác để hàng checkbox không bị
+                           lạc lõng giữa form. */}
+                        <Label
+                            htmlFor="enabled"
+                            className="border-input cursor-pointer rounded-md border px-3 py-2.5 font-normal dark:bg-input/30"
+                        >
                             <input
                                 id="enabled"
                                 name="enabled"
                                 type="checkbox"
-                                className="size-4"
+                                className="size-4 shrink-0 cursor-pointer accent-primary"
                                 checked={form.enabled}
                                 onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
                             />
-                            Đang bật (bot sẽ tính sự kiện này)
+                            <span>
+                                Đang bật <span className="text-muted-foreground">— bot sẽ tính sự kiện này</span>
+                            </span>
                         </Label>
 
                         {error && (
-                            <Alert variant="destructive">
+                            <Alert ref={errorRef} tabIndex={-1} variant="destructive">
                                 <AlertDescription>{error}</AlertDescription>
                             </Alert>
                         )}
 
-                        <div className="flex gap-2">
+                        <div className="border-border mt-1 flex gap-2 border-t pt-4">
                             <Button type="submit" disabled={busy}>
+                                <IconDeviceFloppy stroke={2} />
                                 {busy ? 'Đang lưu…' : 'Lưu'}
                             </Button>
                             <Button type="button" variant="outline" onClick={() => navigate('/admin')}>
+                                <IconX stroke={2} />
                                 Huỷ
                             </Button>
                         </div>

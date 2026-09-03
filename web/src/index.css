@@ -46,7 +46,9 @@
     --destructive-foreground: oklch(0.985 0 0);
     --border: oklch(1 0 0 / 12%);
     --input: oklch(1 0 0 / 16%);
-    --ring: oklch(0.552 0.016 285.938);
+    /* Sáng hơn mặc định shadcn (0.552): ring vẽ ở `ring-ring/50` nên nửa alpha, trên nền
+       gần đen thì 0.552 không đủ 3:1 (WCAG 2.2 focus-appearance). */
+    --ring: oklch(0.75 0.02 285.938);
 }
 
 @theme inline {
@@ -80,6 +82,17 @@
     }
     body {
         @apply bg-background text-foreground;
+    }
+
+    /* Control gốc của trình duyệt (thanh cuộn, spinner, và mọi input native còn lại) tự
+       vẽ theo `color-scheme`. App ép .dark cứng trên <html> nên khai luôn ở đây; tách
+       :root/.dark để sau có toggle vẫn đúng. Datepicker giờ dùng component shadcn nên
+       không còn phụ thuộc chỗ này, nhưng vẫn giữ để control native khác không lạc tông. */
+    :root {
+        color-scheme: light;
+    }
+    .dark {
+        color-scheme: dark;
     }
 }
 

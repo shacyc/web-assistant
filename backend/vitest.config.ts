@@ -36,6 +36,7 @@ export default defineConfig(async () => {
                         ADMIN_AUTH_MODE: 'password',
                         TELEGRAM_BOT_TOKEN: 'test:token',
                         TELEGRAM_CHAT_ID: '-100123',
+                        TELEGRAM_TOPIC_ID: '7',
                         TEST_MIGRATIONS: migrations,
                     },
                 },

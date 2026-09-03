@@ -34,6 +34,8 @@ export function formatCountdownMessage(rows: EventRow[], today: string): string 
         const lines = [
             `*${escapeMd(row.event)}*`,
             `Còn ${cd.remainingDays} ngày · đã qua ${cd.elapsedDays}/${cd.totalDays} \\(${cd.percent}%\\)`,
+            // Số perDayPercent có dấu chấm thập phân → phải qua escapeMd, không thì Telegram 400.
+            escapeMd(`Mỗi ngày trôi qua mất ~${cd.perDayPercent}%`),
             escapeMd(progressBar(cd.percent)),
         ];
         if (row.description) lines.push(`_${escapeMd(row.description)}_`);

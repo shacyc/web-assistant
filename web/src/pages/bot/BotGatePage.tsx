@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { IconLockOpen } from '@tabler/icons-react';
 import { openBotSession, ApiError } from '@/lib/apiClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +18,11 @@ export function BotGatePage({ onUnlocked }: { onUnlocked: () => void }) {
     const [secret, setSecret] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
+    const errorRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (error) errorRef.current?.focus();
+    }, [error]);
 
     async function submit(e: FormEvent) {
         e.preventDefault();
@@ -55,12 +61,13 @@ export function BotGatePage({ onUnlocked }: { onUnlocked: () => void }) {
                         </div>
 
                         {error && (
-                            <Alert variant="destructive" data-testid="gate-error">
+                            <Alert ref={errorRef} tabIndex={-1} variant="destructive" data-testid="gate-error">
                                 <AlertDescription>{error}</AlertDescription>
                             </Alert>
                         )}
 
                         <Button type="submit" data-action="bot.unlock" disabled={busy || !secret}>
+                            <IconLockOpen stroke={2} />
                             {busy ? 'Đang kiểm tra…' : 'Mở khoá'}
                         </Button>
                     </form>

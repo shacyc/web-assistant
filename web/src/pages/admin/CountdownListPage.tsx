@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listCountdowns, deleteCountdown, adminLogout, ApiError, type CountdownEvent } from '@/lib/apiClient';
+import { IconPlus, IconPencil, IconTrash } from '@tabler/icons-react';
+import { listCountdowns, deleteCountdown, ApiError, type CountdownEvent } from '@/lib/apiClient';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -48,17 +49,12 @@ export function CountdownListPage() {
                     <h1 className="text-xl font-semibold">Countdown</h1>
                     <p className="text-muted-foreground text-sm">Hôm nay: {today}</p>
                 </div>
-                <div className="flex gap-2">
-                    <Link to="/admin/logs">
-                        <Button variant="outline" size="sm">Nhật ký</Button>
-                    </Link>
-                    <Link to="/admin/countdowns/new">
-                        <Button size="sm">Thêm sự kiện</Button>
-                    </Link>
-                    <Button variant="ghost" size="sm" onClick={() => adminLogout().then(() => location.reload())}>
-                        Đăng xuất
+                <Link to="/admin/countdowns/new">
+                    <Button size="sm">
+                        <IconPlus stroke={2} />
+                        Thêm sự kiện
                     </Button>
-                </div>
+                </Link>
             </header>
 
             {error && (
@@ -67,7 +63,11 @@ export function CountdownListPage() {
                 </Alert>
             )}
 
-            {rows === null && <p className="text-muted-foreground text-sm">Đang tải…</p>}
+            {rows === null && (
+                <p role="status" className="text-muted-foreground text-sm">
+                    Đang tải…
+                </p>
+            )}
             {rows?.length === 0 && <p className="text-muted-foreground text-sm">Chưa có sự kiện nào.</p>}
 
             {rows && rows.length > 0 && (
@@ -78,7 +78,9 @@ export function CountdownListPage() {
                             <TableHead>Bắt đầu</TableHead>
                             <TableHead>Kết thúc</TableHead>
                             <TableHead>Trạng thái</TableHead>
-                            <TableHead />
+                            <TableHead>
+                                <span className="sr-only">Hành động</span>
+                            </TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -98,12 +100,25 @@ export function CountdownListPage() {
                                         <Badge variant={phase.variant}>{phase.label}</Badge>
                                     </TableCell>
                                     <TableCell className="text-right whitespace-nowrap">
-                                        <Link to={`/admin/countdowns/${row.id}`}>
-                                            <Button variant="ghost" size="sm">Sửa</Button>
-                                        </Link>
-                                        <Button variant="ghost" size="sm" onClick={() => remove(row)}>
-                                            Xoá
-                                        </Button>
+                                        {/* gap-1 + viền tách nút Xoá (đỏ) khỏi Sửa để tránh
+                                           bấm nhầm; h-9 cho vùng chạm rộng hơn h-8 mặc định của size sm. */}
+                                        <div className="flex items-center justify-end gap-1">
+                                            <Link to={`/admin/countdowns/${row.id}`}>
+                                                <Button variant="ghost" size="sm" className="h-9">
+                                                    <IconPencil stroke={2} />
+                                                    Sửa
+                                                </Button>
+                                            </Link>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => remove(row)}
+                                                className="text-destructive hover:text-destructive hover:bg-destructive/10 h-9"
+                                            >
+                                                <IconTrash stroke={2} />
+                                                Xoá
+                                            </Button>
+                                        </div>
                                     </TableCell>
                                 </TableRow>
                             );

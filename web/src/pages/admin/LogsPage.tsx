@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { listLogs, ApiError, type ExecutionLog } from '@/lib/apiClient';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export function LogsPage() {
@@ -17,14 +16,20 @@ export function LogsPage() {
 
     return (
         <div className="mx-auto max-w-4xl px-4 py-8">
-            <header className="mb-6 flex items-center justify-between">
+            <header className="mb-6">
                 <h1 className="text-xl font-semibold">Nhật ký thực thi</h1>
-                <Link to="/admin">
-                    <Button variant="outline" size="sm">Quay lại</Button>
-                </Link>
             </header>
 
-            {error && <p className="text-destructive text-sm">{error}</p>}
+            {error && (
+                <Alert variant="destructive" className="mb-4">
+                    <AlertDescription>{error}</AlertDescription>
+                </Alert>
+            )}
+            {rows === null && !error && (
+                <p role="status" className="text-muted-foreground text-sm">
+                    Đang tải…
+                </p>
+            )}
             {rows?.length === 0 && <p className="text-muted-foreground text-sm">Bot chưa chạy lần nào.</p>}
 
             {rows && rows.length > 0 && (
@@ -47,7 +52,12 @@ export function LogsPage() {
                                 <TableCell>
                                     <Badge variant={log.status === 'ok' ? 'default' : 'destructive'}>{log.status}</Badge>
                                 </TableCell>
-                                <TableCell className="text-muted-foreground max-w-md truncate text-xs">
+                                {/* truncate để hàng không giãn; title cho xem đủ khi rê chuột
+                                   — detail có thể chứa lý do lỗi nên không được mất hẳn. */}
+                                <TableCell
+                                    className="text-muted-foreground max-w-md truncate text-xs"
+                                    title={log.detail ?? undefined}
+                                >
                                     {log.detail}
                                 </TableCell>
                             </TableRow>

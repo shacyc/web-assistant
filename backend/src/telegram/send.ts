@@ -10,7 +10,12 @@ export interface SendResult {
  * qua request thì bất kỳ ai vào được trang bot cũng biến bot thành công cụ spam vào
  * nhóm tuỳ ý.
  */
-export async function sendTelegram(botToken: string, chatId: string, text: string): Promise<SendResult> {
+export async function sendTelegram(
+    botToken: string,
+    chatId: string,
+    text: string,
+    threadId?: string,
+): Promise<SendResult> {
     if (!botToken || !chatId) {
         return { ok: false, error: 'Chưa cấu hình TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID' };
     }
@@ -20,6 +25,9 @@ export async function sendTelegram(botToken: string, chatId: string, text: strin
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
             chat_id: chatId,
+            // Nhóm forum: không có message_thread_id thì Telegram gửi vào "General". Chỉ
+            // gắn khi có cấu hình — group thường (không bật Topics) mà gửi kèm sẽ 400.
+            ...(threadId ? { message_thread_id: Number(threadId) } : {}),
             text,
             parse_mode: 'MarkdownV2',
             disable_web_page_preview: true,

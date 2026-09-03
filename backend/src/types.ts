@@ -25,6 +25,7 @@ export interface Bindings {
     ADMIN_PASSWORD: string;
     TELEGRAM_BOT_TOKEN: string;
     TELEGRAM_CHAT_ID: string;
+    TELEGRAM_TOPIC_ID?: string; // id topic của forum group; bỏ trống = gửi vào "General"
 }
 
 export interface Env {

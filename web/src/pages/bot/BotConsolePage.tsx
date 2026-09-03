@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { IconLock } from '@tabler/icons-react';
 import { listBotActions, botToken, ApiError, type ActionMeta } from '@/lib/apiClient';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -35,6 +36,7 @@ export function BotConsolePage({ onLocked }: { onLocked: () => void }) {
                     <p className="text-muted-foreground text-sm">Chọn một action, điền form nếu có, rồi ấn Thực thi.</p>
                 </div>
                 <Button variant="outline" size="sm" data-action="bot.lock" onClick={lock}>
+                    <IconLock stroke={2} />
                     Khoá lại
                 </Button>
             </header>
@@ -45,7 +47,11 @@ export function BotConsolePage({ onLocked }: { onLocked: () => void }) {
                 </Alert>
             )}
 
-            {actions === null && !error && <p className="text-muted-foreground text-sm">Đang tải…</p>}
+            {actions === null && !error && (
+                <p role="status" className="text-muted-foreground text-sm">
+                    Đang tải…
+                </p>
+            )}
 
             {actions?.length === 0 && <p className="text-muted-foreground text-sm">Chưa có action nào.</p>}
 

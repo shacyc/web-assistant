@@ -58,7 +58,12 @@ export const countdownNotify: BotAction = {
             };
         }
 
-        const result = await sendTelegram(ctx.env.TELEGRAM_BOT_TOKEN, ctx.env.TELEGRAM_CHAT_ID, message);
+        const result = await sendTelegram(
+            ctx.env.TELEGRAM_BOT_TOKEN,
+            ctx.env.TELEGRAM_CHAT_ID,
+            message,
+            ctx.env.TELEGRAM_TOPIC_ID,
+        );
         if (!result.ok) {
             return { ok: false, summary: `Gửi Telegram thất bại: ${result.error}`, data: { sent: false, error: result.error } };
         }
