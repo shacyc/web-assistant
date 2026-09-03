@@ -48,6 +48,12 @@ describe('computeCountdown', () => {
         expect(cd.perDayPercent).toBe(3.33);
     });
 
+    it('percent giữ 2 số lẻ khi không chia hết', () => {
+        // 1 / 3 chặng = 33.333… → 33.33, không phải 33.
+        const cd = computeCountdown('2026-09-01', '2026-09-04', '2026-09-02')!;
+        expect(cd.percent).toBe(33.33);
+    });
+
     it('đúng ngày bắt đầu: elapsed = 0, vẫn active', () => {
         const cd = computeCountdown('2026-09-01', '2026-09-11', '2026-09-01')!;
         expect(cd.elapsedDays).toBe(0);

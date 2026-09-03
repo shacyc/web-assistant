@@ -14,6 +14,15 @@
 		"enabled": true,
 		"head_sampling_rate": 1
 	},
+	// Cron chạy handler `scheduled` trong src/index.ts. Biểu thức LUÔN theo giờ UTC —
+	// wrangler không đọc `vars.TIMEZONE`. 4:30 sáng Asia/Ho_Chi_Minh (UTC+7) = 21:30 UTC
+	// hôm trước. Để lịch ở đây (không phải dashboard) vì `wrangler deploy` quản lý cron
+	// declarative: cron thêm tay trên dashboard sẽ bị lần deploy sau ghi đè.
+	"triggers": {
+		"crons": [
+			"30 21 * * *"
+		]
+	},
 	// Một Worker serve cả SPA lẫn API. `run_worker_first` để /api/* không bị asset
 	// handler nuốt mất; mọi path khác rơi về index.html (SPA fallback).
 	"assets": {

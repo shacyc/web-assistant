@@ -1,6 +1,11 @@
 import { Hono } from 'hono';
-import type { Env } from './types';
+import { drizzle } from 'drizzle-orm/d1';
+import * as schema from './db/schema';
+import { executionLogs } from './db/schema';
+import type { Bindings, Env } from './types';
 import { fail, serverError } from './lib/respond';
+import { today } from './lib/dates';
+import { countdownNotify } from './actions/countdownNotify';
 import { botRoutes } from './routes/bot';
 import { adminRoutes } from './routes/admin';
 
@@ -27,4 +32,41 @@ app.all('/api/*', (c) => fail(c, 404, 'NOT_FOUND', 'Không có endpoint này'));
 
 app.onError((err, c) => serverError(c, err, 'unhandled', { path: c.req.path }));
 
-export default app;
+export default {
+    fetch: app.fetch,
+
+    // Cron gọi THẲNG action mà bot vẫn bấm — không đi vòng qua HTTP + session token.
+    // Kết quả ghi vào cùng bảng execution_logs với tiền tố [cron] để admin phân biệt
+    // được lần chạy tự động với lần bot bấm tay. Lịch: triggers.crons trong wrangler.jsonc.
+    async scheduled(_event: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
+        const db = drizzle(env.assistant_db, { schema });
+
+        let summary: string;
+        let status: 'ok' | 'error';
+        try {
+            const result = await countdownNotify.run(
+                { db, env, today: today(env.TIMEZONE) },
+                {},
+            );
+            summary = result.summary;
+            status = result.ok ? 'ok' : 'error';
+            console.log('[cron] countdown.notify:', summary);
+        } catch (err) {
+            summary = err instanceof Error ? err.message : 'unknown';
+            status = 'error';
+            console.error('[cron] countdown.notify threw:', summary);
+        }
+
+        // Ghi log là best-effort: tin nhắn có thể đã gửi đi rồi, đừng để lỗi insert
+        // che mất điều đó.
+        await db
+            .insert(executionLogs)
+            .values({
+                id: crypto.randomUUID(),
+                actionId: 'countdown.notify',
+                status,
+                detail: `[cron] ${summary}`.slice(0, 1000),
+            })
+            .catch((e) => console.error('[cron] log.insert', e));
+    },
+};

@@ -58,7 +58,7 @@ export interface Countdown {
     totalDays: number;
     elapsedDays: number;
     remainingDays: number;
-    percent: number; // 0..100, đã làm tròn
+    percent: number; // 0..100, làm tròn 2 số lẻ
     perDayPercent: number; // mỗi ngày trôi qua chiếm bao nhiêu % toàn chặng, làm tròn 2 số lẻ
     phase: Phase;
 }
@@ -83,9 +83,11 @@ export function computeCountdown(startDate: string, endDate: string, todayDate: 
 
     // totalDays === 0 là hợp lệ: sự kiện gói trong đúng một ngày. Không được chia cho 0
     // ở đây — hôm đó coi như đã trọn vẹn 100%.
+    // Giữ 2 số lẻ thay vì làm tròn về số nguyên: chặng dài (vài trăm ngày) thì mỗi ngày
+    // nhích chưa tới 1%, làm tròn nguyên là tin nhắn đứng yên nhiều hôm liền.
     const percent = totalDays === 0
         ? (phase === 'pending' ? 0 : 100)
-        : Math.round((elapsedDays / totalDays) * 100);
+        : Math.round((elapsedDays / totalDays) * 10000) / 100;
 
     // Mỗi ngày trôi qua "ăn" bao nhiêu phần trăm toàn bộ chặng. Không làm tròn về số
     // nguyên như `percent`: chặng dài hơn ~150 ngày sẽ ra 0% và mất hết ý nghĩa. Giữ 2

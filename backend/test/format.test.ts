@@ -55,6 +55,12 @@ describe('formatCountdownMessage', () => {
         expect(msg).toContain('Mỗi ngày trôi qua mất \\~3\\.33%');
     });
 
+    it('escape dấu chấm thập phân của phần trăm đã qua', () => {
+        // 1/3 chặng → 33.33% → dấu chấm phải được escape, không thì Telegram trả 400.
+        const msg = formatCountdownMessage([row({ startDate: '2026-09-01', endDate: '2026-09-04' })], '2026-09-02')!;
+        expect(msg).toContain('đã qua 1/3 \\(33\\.33%\\)');
+    });
+
     it('escape tên sự kiện chứa ký tự Markdown', () => {
         const msg = formatCountdownMessage([row({ event: 'Deadline #1 (gấp!)' })], '2026-09-19')!;
         expect(msg).toContain('Deadline \\#1 \\(gấp\\!\\)');
