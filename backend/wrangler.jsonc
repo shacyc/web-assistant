@@ -14,7 +14,7 @@
     // Một Worker serve cả SPA lẫn API. `run_worker_first` để /api/* không bị asset
     // handler nuốt mất; mọi path khác rơi về index.html (SPA fallback).
     "assets": {
-        "directory": "../web/dist",
+        "directory": "../web-astryx/dist",
         "binding": "ASSETS",
         "not_found_handling": "single-page-application",
         "run_worker_first": ["/api/*"]

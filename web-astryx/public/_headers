@@ -1,0 +1,10 @@
+# Header cho ASSET TĨNH (HTML/JS/CSS). Cần file này vì `run_worker_first` chỉ đưa
+# `/api/*` qua worker — mọi đường khác do Static Assets phục vụ thẳng, không chạy qua
+# middleware trong src/index.ts, nên header bảo mật đặt ở đó KHÔNG áp cho trang HTML.
+/*
+  X-Robots-Tag: noindex, nofollow
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  # Trang /bot public nên nhúng được vào iframe là rủi ro thừa: không tính năng nào cần.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'

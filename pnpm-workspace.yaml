@@ -1,11 +1,15 @@
 packages:
   - web
+  - web-astryx
   - backend
 
 # pnpm 11 chặn build script của dependency theo mặc định (chống supply-chain qua
-# postinstall). Hai gói dưới đây bắt buộc chạy build thật: esbuild tải binary native,
-# workerd tải runtime của Workers. Không cho phép thì vite/wrangler không chạy nổi.
-# Khai ở đây thay vì chạy `pnpm approve-builds` để mọi máy dựng lại y hệt nhau.
+# postinstall). Khai ở đây thay vì chạy `pnpm approve-builds` để mọi máy dựng lại y hệt nhau.
 allowBuilds:
+  # esbuild tải binary native, workerd tải runtime của Workers — không cho thì vite/wrangler chết.
   esbuild: true
   workerd: true
+  # Astryx: cả hai postinstall chỉ in một dòng "nhắc chạy astryx init", không build gì.
+  # web-astryx tiêu thụ dist đã build sẵn (@astryxdesign/theme-neutral/theme.css), nên tắt.
+  '@astryxdesign/cli': false
+  '@astryxdesign/core': false

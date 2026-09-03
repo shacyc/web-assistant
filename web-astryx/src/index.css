@@ -1,0 +1,24 @@
+/* Astryx đi theo đường "CSS dựng sẵn": ba file này là bắt buộc, thiếu thì component ra
+   trần không style. Thứ tự: reset → base component css → theme tokens. */
+@import '@astryxdesign/core/reset.css';
+@import '@astryxdesign/core/astryx.css';
+@import '@astryxdesign/theme-neutral/theme.css';
+
+/* <Theme mode="dark"> lo màu; đây chỉ kéo nền body theo token nền của app để không có
+   một vệt trắng lúc tải trước khi React mount. */
+html,
+body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--color-background-body, var(--color-background));
+}
+
+/* Quy ước dự án: KHÔNG animation. Tắt vô điều kiện — bọc trong
+   prefers-reduced-motion là ngược ý định (người bật reduced motion thành nhóm DUY NHẤT
+   còn thấy animation). Astryx không có compiler ở đây nên chặn thẳng bằng CSS. */
+*,
+*::before,
+*::after {
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
+}

@@ -7,10 +7,10 @@
   },
   "scripts": {
     "init": "bash scripts/init.sh",
-    "dev": "pnpm --filter web run build && (pnpm --filter web run dev & pnpm --filter backend run dev)",
-    "build": "pnpm --filter web run build",
+    "dev": "pnpm --filter web-astryx run build && (pnpm --filter web-astryx run dev & pnpm --filter backend run dev)",
+    "build": "pnpm --filter web-astryx run build",
     "deploy": "pnpm run build && pnpm --filter backend run deploy",
-    "typecheck": "pnpm --filter web run typecheck && pnpm --filter backend run typecheck",
+    "typecheck": "pnpm --filter web-astryx run typecheck && pnpm --filter backend run typecheck",
     "test": "pnpm --filter backend run test",
     "db:generate": "pnpm --filter backend run db:generate",
     "db:migrate": "pnpm --filter backend run db:migrate"
