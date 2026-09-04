@@ -181,6 +181,67 @@ export const getCountdownConfig = () => request<CountdownConfig>('GET', '/admin/
 export const putCountdownConfig = (cfg: CountdownConfig) =>
     request<{ ok: true }>('PUT', '/admin/countdown-config', cfg);
 
+// Gửi thử ngay bằng cấu hình đang lưu (dryRun=false). Trả {ok, summary} kể cả khi
+// không gửi được — summary là câu để hiển thị.
+export const testCountdownConfig = () =>
+    request<{ ok: boolean; summary: string }>('POST', '/admin/countdown-config/test');
+
+/* ---------- Health-check ---------- */
+
+export interface HealthCheck {
+    id: string;
+    label: string;
+    url: string;
+    enabled: boolean;
+    checkScript: string | null;
+    // 'up' | 'down' | chuỗi tuỳ checkScript. null = chưa kiểm lần nào.
+    lastState: string | null;
+    lastStateAt: string | null; // ISO, xem ghi chú ở CountdownEvent
+    lastCheckedAt: string | null;
+    lastDetail: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+}
+
+// `checkScript` null = xoá hàm (quay về luật mặc định). Không gửi field khi PATCH = giữ nguyên.
+export type HealthCheckInput = {
+    label: string;
+    url: string;
+    enabled: boolean;
+    checkScript: string | null;
+};
+
+export const listHealthChecks = () => request<{ healthchecks: HealthCheck[] }>('GET', '/admin/healthchecks');
+
+export const createHealthCheck = (input: HealthCheckInput) =>
+    request<{ id: string }>('POST', '/admin/healthchecks', input);
+
+export const updateHealthCheck = (id: string, patch: Partial<HealthCheckInput>) =>
+    request<{ ok: true }>('PATCH', `/admin/healthchecks/${id}`, patch);
+
+export const deleteHealthCheck = (id: string) => request<{ ok: true }>('DELETE', `/admin/healthchecks/${id}`);
+
+// Kiểm tra ngay mọi site đang bật (dryRun=false): cập nhật trạng thái + gửi Telegram nếu
+// có đổi. Trả {ok, summary} kể cả khi lỗi — summary là câu để hiển thị.
+export const runHealthChecks = () =>
+    request<{ ok: boolean; summary: string }>('POST', '/admin/healthchecks/run');
+
+export interface HealthCheckConfig {
+    chatIdKey: string | null;
+    topicIdKey: string | null;
+    // Mẫu tin nhắn cho mỗi lần state đổi. Null/rỗng = mẫu mặc định.
+    template: string | null;
+}
+
+export const getHealthCheckConfig = () => request<HealthCheckConfig>('GET', '/admin/healthcheck-config');
+
+export const putHealthCheckConfig = (cfg: HealthCheckConfig) =>
+    request<{ ok: true }>('PUT', '/admin/healthcheck-config', cfg);
+
+// Chạy healthcheck.run ngay bằng cấu hình đang lưu. Trả {ok, summary} kể cả khi lỗi.
+export const testHealthCheckConfig = () =>
+    request<{ ok: boolean; summary: string }>('POST', '/admin/healthcheck-config/test');
+
 /* ---------- Lịch chạy tự động ---------- */
 
 export type ScheduleKind = 'daily' | 'weekly' | 'monthly' | 'interval' | 'cron' | 'every';

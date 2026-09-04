@@ -2,6 +2,7 @@ import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
 import { AdminGate } from '@/pages/admin/AdminGate';
 import { AdminLayout } from '@/components/layout/AdminLayout';
 import { CountdownListPage } from '@/pages/admin/CountdownListPage';
+import { HealthCheckListPage } from '@/pages/admin/HealthCheckListPage';
 import { SchedulesPage } from '@/pages/admin/SchedulesPage';
 import { VariablesPage } from '@/pages/admin/VariablesPage';
 import { ConfigPage } from '@/pages/admin/ConfigPage';
@@ -25,6 +26,7 @@ const router = createBrowserRouter([
             // Bookmark cũ tới /admin/countdowns/* rơi về danh sách thay vì màn 404.
             { index: true, element: <CountdownListPage /> },
             { path: 'countdowns/*', element: <Navigate to="/admin" replace /> },
+            { path: 'healthchecks', element: <HealthCheckListPage /> },
             { path: 'schedules', element: <SchedulesPage /> },
             { path: 'config', element: <ConfigPage /> },
             { path: 'variables', element: <VariablesPage /> },

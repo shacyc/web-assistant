@@ -21,6 +21,16 @@ export interface FieldError {
     reason: string;
 }
 
+/** URL parse được VÀ scheme là http/https. `ftp://`, `javascript:`, chuỗi bừa đều trượt. */
+function isHttpUrl(value: string): boolean {
+    try {
+        const u = new URL(value);
+        return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
 /**
  * Khi một field sai, mọi lần đọc SAU đó vẫn chạy nhưng không ghi đè lỗi đầu tiên, và
  * trả về giá trị rỗng hợp kiểu. Nhờ vậy call site viết thẳng một mạch rồi kiểm `.error`
@@ -144,6 +154,27 @@ export class Body {
         if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) {
             this.fail(name, `phải là số nguyên từ ${min} đến ${max}`);
             return min;
+        }
+        return v;
+    }
+
+    /** URL bắt buộc, phải parse được và dùng scheme http/https. */
+    requiredUrl(name: string, max: number): string {
+        const v = this.requiredString(name, max);
+        if (this.firstError || !isHttpUrl(v)) {
+            if (!this.firstError) this.fail(name, 'phải là URL http(s) hợp lệ');
+            return '';
+        }
+        return v;
+    }
+
+    /** URL tuỳ chọn. Gửi null tường minh = xoá; không gửi = giữ nguyên. */
+    optionalUrl(name: string, max: number): string | null | undefined {
+        const v = this.optionalString(name, max);
+        if (v === undefined || v === null) return v;
+        if (!isHttpUrl(v)) {
+            this.fail(name, 'phải là URL http(s) hợp lệ');
+            return undefined;
         }
         return v;
     }

@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from 'react';
-import { Hourglass, CalendarClock, SlidersHorizontal, Variable, History } from 'lucide-react';
+import { Hourglass, Activity, CalendarClock, SlidersHorizontal, Variable, History } from 'lucide-react';
 
 // Sidebar dựng từ mảng này — thêm một màn admin = thêm một dòng ở đây, không đụng
 // AdminLayout. Cùng tinh thần với registry action của trang /bot.
@@ -13,6 +13,7 @@ export interface AdminNavItem {
 
 export const adminNav: AdminNavItem[] = [
     { to: '/admin', label: 'Countdown', icon: Hourglass, end: true },
+    { to: '/admin/healthchecks', label: 'Health check', icon: Activity },
     { to: '/admin/schedules', label: 'Lịch chạy', icon: CalendarClock },
     { to: '/admin/config', label: 'Cấu hình', icon: SlidersHorizontal },
     { to: '/admin/variables', label: 'Variables', icon: Variable },

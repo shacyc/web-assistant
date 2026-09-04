@@ -35,8 +35,9 @@ function round2(n: number): number {
 
 /**
  * Tham số dùng được trong mẫu NỘI DUNG (`body`) — render một lần cho mỗi sự kiện đang
- * chạy. Chữ trong mẫu là markup của admin, admin TỰ escape; chỉ các giá trị dưới đây
- * được `escapeMd` tự động (số có dấu chấm, tên sự kiện có `#`…).
+ * chạy. Giá trị thay vào được `escapeMd` tự động; phần chữ admin gõ cũng được escape
+ * (xem `escapeTemplateLiteral`) trừ các ký tự markup `* _ ~ | \` \\`, nên `*{eventName}*`
+ * vẫn in đậm còn dấu `-` `(` `)` `.` trong câu văn không làm Telegram trả 400.
  *
  * | `{eventName}`         | tên sự kiện                                  |
  * | `{startDate}`         | ngày bắt đầu, dd/MM/yyyy                     |
@@ -45,6 +46,8 @@ function round2(n: number): number {
  * | `{totalWeeks}`        | tổng số tuần của chặng, 2 số lẻ             |
  * | `{passedDays}`        | số ngày đã qua (số nguyên)                   |
  * | `{passedWeeks}`       | số tuần đã qua, 2 số lẻ                     |
+ * | `{passedDaysPercent}` | phần trăm chặng đã qua, 2 số lẻ             |
+ * | `{passedWeeksPercent}`| như trên (tuần rút gọn cho cùng tỉ lệ)      |
  * | `{remainDays}`        | số ngày còn lại (số nguyên)                  |
  * | `{remainWeeks}`       | số tuần còn lại, 2 số lẻ                     |
  * | `{remainDaysPercent}` | phần trăm chặng còn lại, 2 số lẻ            |
@@ -57,6 +60,9 @@ function bodyVars(row: EventRow, cd: Countdown, today: string): Record<string, s
     // "Phần trăm còn lại" theo ngày và theo tuần là cùng một tỉ lệ (chia 7 triệt tiêu),
     // nên hai key trỏ về cùng giá trị — giữ cả hai vì admin có thể quen gọi tên nào.
     const remainPercent = cd.totalDays === 0 ? 0 : round2((cd.remainingDays / cd.totalDays) * 100);
+    // `cd.percent` đã là phần trăm chặng đã qua (2 số lẻ, có xử lý totalDays === 0). Tuần
+    // và ngày cho cùng tỉ lệ nên hai key "passed…Percent" trỏ về một giá trị.
+    const passedPercent = String(cd.percent);
     return {
         eventName: row.event,
         startDate: formatVN(row.startDate),
@@ -65,6 +71,8 @@ function bodyVars(row: EventRow, cd: Countdown, today: string): Record<string, s
         totalWeeks: String(round2(cd.totalDays / 7)),
         passedDays: String(cd.elapsedDays),
         passedWeeks: String(round2(cd.elapsedDays / 7)),
+        passedDaysPercent: passedPercent,
+        passedWeeksPercent: passedPercent,
         remainDays: String(cd.remainingDays),
         remainWeeks: String(round2(cd.remainingDays / 7)),
         remainDaysPercent: String(remainPercent),
@@ -80,14 +88,34 @@ function onceVars(today: string, count: number): Record<string, string> {
     return { today: formatVN(today), count: String(count) };
 }
 
-/**
- * Thay `{key}` bằng giá trị đã escape. Key lạ giữ nguyên `{key}` thay vì ném lỗi lúc gửi —
- * admin gõ sai tên tham số chỉ thấy chữ `{typo}` trong tin nhắn, không mất cả thông báo.
- */
-function fillTemplate(tpl: string, vars: Record<string, string>): string {
-    return tpl.replace(/\{(\w+)\}/g, (whole, key: string) =>
-        key in vars ? escapeMd(vars[key]) : whole,
+// Trong CHỮ LITERAL của mẫu, giữ nguyên 6 ký tự này để admin còn *in đậm* / _nghiêng_ /
+// `code` / ~gạch~ / ||ẩn|| và tự escape `\.` khi cần. Mọi ký tự reserved khác — nhất là
+// '-', '(', ')', '.', '!' mà admin gõ như văn xuôi — được escape tự động: nếu không,
+// Telegram trả 400 "Character '-' is reserved" và mất trắng cả tin nhắn.
+const TEMPLATE_MARKUP_CHARS = new Set(['*', '_', '~', '|', '`', '\\']);
+
+/** Escape phần chữ do admin gõ, chừa lại các ký tự markup ở trên. */
+function escapeTemplateLiteral(text: string): string {
+    return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, (ch) =>
+        TEMPLATE_MARKUP_CHARS.has(ch) ? ch : `\\${ch}`,
     );
+}
+
+/**
+ * Thay `{key}` bằng GIÁ TRỊ đã escape; phần chữ literal của mẫu cũng được escape (trừ ký
+ * tự markup). Key lạ giữ nguyên chữ `{key}` (đã escape thành `\{key\}`) thay vì làm hỏng
+ * cả tin nhắn — admin gõ sai tên tham số chỉ thấy `{typo}` hiện ra, không bị Telegram 400.
+ */
+export function fillTemplate(tpl: string, vars: Record<string, string>): string {
+    let out = '';
+    let last = 0;
+    const re = /\{(\w+)\}/g;
+    for (let m = re.exec(tpl); m; m = re.exec(tpl)) {
+        out += escapeTemplateLiteral(tpl.slice(last, m.index));
+        out += m[1] in vars ? escapeMd(vars[m[1]]) : escapeTemplateLiteral(m[0]);
+        last = re.lastIndex;
+    }
+    return out + escapeTemplateLiteral(tpl.slice(last));
 }
 
 function defaultBlock(row: EventRow, cd: Countdown): string {

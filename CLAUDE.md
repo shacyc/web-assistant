@@ -104,7 +104,10 @@ phòng thủ đã soi bằng cách này, mỗi lớp phá là có đỏ: `escape
 `isDueStructured`/`last_run_date` của lịch (1 đỏ) · `UPDATE` có điều kiện chống cron chạy
 đôi (1 đỏ) · chốt `last_run_slot` của kiểu cron (1 đỏ) · ngữ nghĩa "ngày HOẶC thứ" của
 cron (1 đỏ) · kẹp `day_of_month` về ngày cuối tháng (1 đỏ) · chốt khoảng của `isDueEvery`
-(1 đỏ) · `last_run_at` ghi mốc nhịp chứ không phải lúc chạy xong (1 đỏ).
+(1 đỏ) · `last_run_at` ghi mốc nhịp chứ không phải lúc chạy xong (1 đỏ) · ngưỡng 4xx của
+`defaultState` health-check (1 đỏ) · che `fetch` trong `runCheckScript` (1 đỏ) · chỉ gửi
+health-check khi `state` đổi (nhiều đỏ) · không ghi `last_state` khi gửi lỗi / chưa cấu
+hình (2 đỏ) · `dryRun` của health-check không ghi DB (1 đỏ).
 
 **Chặn request ra ngoài trong test bằng `mockTelegram()` trong `test/helpers.ts`**, không
 phải `fetchMock` của `cloudflare:test` — pool 0.22 đã bỏ export đó (cùng với
@@ -178,6 +181,46 @@ tầng, "chạy gì lúc nào" là dữ liệu admin sửa qua `/admin/schedules
 Test handler `scheduled` bằng `createScheduledController` + `worker.scheduled(...)` (xem
 `test/schedules.test.ts`), không qua `SELF`. Local: `wrangler dev` rồi
 `curl localhost:8787/cdn-cgi/local/scheduled`.
+
+## Health-check
+
+Theo dõi vài website "còn sống hay không". Cùng khuôn countdown: bảng `healthcheck_targets`
+(mỗi URL một dòng, bật/tắt được, có `check_script` tuỳ chọn) + bảng một dòng
+`healthcheck_config` trỏ tới key chat/topic trong `variables` + action `healthcheck.run`
+trong registry. Màn `/admin/healthchecks` (danh sách + nút "Cấu hình gửi"); màn
+`/admin/config` có thêm khối cấu hình.
+
+- `healthcheck.run` fetch **song song** mọi target đang bật (timeout 10s), so `state` với
+  `last_state`, **chỉ gửi Telegram khi state đổi — cả hai chiều** (up→down cảnh báo sập,
+  down→up báo phục hồi). `last_state` null lần đầu coi như `'up'`: site đang khoẻ thì
+  chốt im lặng, site đang sập thì báo ngay.
+- Luật `state` mặc định (`lib/healthcheck.ts` `defaultState`): lỗi mạng / timeout /
+  **HTTP ≥ 400** → `'down'`. 4xx tính là sập — chủ dự án chọn phương án này.
+- `check_script`: thân một hàm JS admin tự viết, nhận `probe` (dữ liệu thuần: `url`,
+  `status`, `ok`, `body`, `durationMs`, `error`) và `return` một chuỗi state (`'up'` =
+  khoẻ, chuỗi khác = sập). Chạy bằng `new Function` với `fetch` / `globalThis` / … bị che
+  thành `undefined`. **KHÔNG phải sandbox thật** — một `new Function` vẫn chạm được
+  globalThis qua đường vòng; chỉ chặn đường thẳng và ghi rõ chủ ý. Chấp nhận được vì chỉ
+  admin (chủ dự án, cùng người chạy `wrangler deploy`) lưu được script. Script ném lỗi /
+  return không phải chuỗi → `state = 'down'` ("kêu còn hơn bỏ sót").
+- **CPU 10ms là CPU time, không phải wall-clock.** `await fetch` là I/O nên chờ 10s không
+  tốn CPU. Cái tốn CPU: đọc body + escape + `new Function`. Nên chỉ đọc `.text()` khi
+  target có `check_script`, cắt body ở 100KB (`BODY_MAX`), fetch song song.
+- Subrequest: N fetch + tối đa N lần gửi Telegram ≤ **50** (trần Free). "Vài site" thì dư.
+- Gửi Telegram lỗi **hoặc** chưa cấu hình đích → **không** ghi `last_state`; nhịp cron sau
+  vẫn tính là "đổi" và thử gửi lại (cảnh báo không mất). `last_checked_at`/`last_detail`
+  vẫn ghi cho mọi target.
+- `dryRun` (field của action, và nút Chạy ngay ở /bot) → không gửi, **không ghi DB nào**.
+- Migration `0007` seed một dòng `schedules` cho `healthcheck.run` (`*/5 * * * *`,
+  `kind='cron'`) **`enabled = 0`** — admin bật ở `/admin/schedules` sau khi thêm URL +
+  cấu hình đích.
+- Hai nút chạy `healthcheck.run` thật ngay (dryRun=false), đều qua `runActionById`:
+  `POST /api/admin/healthchecks/run` — nút "Kiểm tra ngay" ở màn danh sách, log `[chạy tay]`;
+  `POST /api/admin/healthcheck-config/test` — nút "Chạy thử" ở form cấu hình, log `[test]`.
+- Test chặn request ra ngoài bằng `mockHttp()` trong `test/helpers.ts` (không phải
+  `mockTelegram()`): ghi lại call Telegram, cho `on(url, res)` giả response health-check,
+  **URL lạ chưa `on()` vẫn ném lỗi**. `admin.test.ts` + `healthcheck.test.ts` cache
+  cookie/token trong `beforeAll` — `/session` bị rate-limit 10/phút.
 
 ## Secret
 

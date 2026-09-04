@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SELF, env, botToken, seedEvent, seedCountdownConfig, mockTelegram, type TelegramMock } from './helpers';
+import { SELF, env, botToken, adminCookie, seedEvent, seedCountdownConfig, mockTelegram, type TelegramMock } from './helpers';
 import { today } from '../src/lib/dates';
 
 // Bật mock cho MỌI test trong file: request ra ngoài không phải Telegram sẽ ném lỗi,
@@ -168,5 +168,44 @@ describe('countdown.notify', () => {
         const { results } = await env.assistant_db.prepare('SELECT action_id, status FROM execution_logs').all();
         expect(results).toHaveLength(1);
         expect(results[0]).toMatchObject({ action_id: 'countdown.notify', status: 'ok' });
+    });
+});
+
+describe('POST /api/admin/countdown-config/test — nút "Gửi thử"', () => {
+    const testReq = async () =>
+        SELF.fetch('https://x/api/admin/countdown-config/test', {
+            method: 'POST',
+            headers: { Cookie: await adminCookie() },
+        });
+
+    it('không cookie admin → 401, KHÔNG gọi Telegram', async () => {
+        const res = await SELF.fetch('https://x/api/admin/countdown-config/test', { method: 'POST' });
+        expect(res.status).toBe(401);
+        expect(tg.calls).toHaveLength(0);
+    });
+
+    it('có sự kiện active + cấu hình đủ → gửi Telegram THẬT (dryRun=false), ghi log [test]', async () => {
+        await seedCountdownConfig({ chatId: CHAT_ID, topicId: TOPIC_ID });
+        await seedEvent({ event: 'X', startDate: shift(-1), endDate: shift(1) });
+
+        const res = await testReq();
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { ok: boolean; summary: string };
+        expect(body.ok).toBe(true);
+        expect(tg.calls).toHaveLength(1);
+
+        const { results } = await env.assistant_db
+            .prepare('SELECT status, detail FROM execution_logs')
+            .all();
+        expect(results).toHaveLength(1);
+        expect(results[0].status).toBe('ok');
+        expect(String(results[0].detail)).toContain('[test]');
+    });
+
+    it('không có sự kiện active → ok:true, KHÔNG gọi Telegram', async () => {
+        await seedCountdownConfig({ chatId: CHAT_ID, topicId: TOPIC_ID });
+        const body = (await (await testReq()).json()) as { ok: boolean };
+        expect(body.ok).toBe(true);
+        expect(tg.calls).toHaveLength(0);
     });
 });

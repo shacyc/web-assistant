@@ -1,5 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { SELF, env, adminCookie, seedEvent } from './helpers';
+
+// Lấy cookie MỘT lần cho cả file: `/api/admin/session` bị ADMIN_LOGIN_LIMITER chặn ở
+// 10 lần/phút/IP. Cookie là JWT stateless hạn 2h, `beforeEach` chỉ xoá bảng chứ không
+// vô hiệu hoá nó — dùng lại xuyên suốt được. Test nào cần kiểm chính đường đăng nhập
+// thì tự gọi lại.
+let COOKIE: string;
+beforeAll(async () => {
+    COOKIE = await adminCookie();
+});
 
 const req = (path: string, init: RequestInit & { cookie?: string } = {}) => {
     const { cookie, ...rest } = init;
@@ -29,7 +38,7 @@ describe('đăng nhập admin', () => {
 
 describe('cổng admin', () => {
     it('không cookie → 401 trên mọi endpoint admin', async () => {
-        for (const path of ['/api/admin/countdowns', '/api/admin/logs', '/api/admin/me', '/api/admin/variables', '/api/admin/countdown-config']) {
+        for (const path of ['/api/admin/countdowns', '/api/admin/logs', '/api/admin/me', '/api/admin/variables', '/api/admin/countdown-config', '/api/admin/countdown-config/test', '/api/admin/healthchecks', '/api/admin/healthchecks/run', '/api/admin/healthcheck-config', '/api/admin/healthcheck-config/test']) {
             expect((await req(path)).status).toBe(401);
         }
     });
@@ -50,7 +59,7 @@ describe('cổng admin', () => {
 
 describe('CRUD countdown', () => {
     it('tạo và đọc lại', async () => {
-        const cookie = await adminCookie();
+        const cookie = COOKIE;
         const create = await req('/api/admin/countdowns', {
             method: 'POST',
             cookie,
@@ -68,7 +77,7 @@ describe('CRUD countdown', () => {
     it('endDate trước startDate → 400 chứ không phải 500', async () => {
         const res = await req('/api/admin/countdowns', {
             method: 'POST',
-            cookie: await adminCookie(),
+            cookie: COOKIE,
             body: JSON.stringify({ event: 'Ngược', startDate: '2026-10-01', endDate: '2026-09-01' }),
         });
         expect(res.status).toBe(400);
@@ -78,14 +87,14 @@ describe('CRUD countdown', () => {
     it('ngày không có thật → 400', async () => {
         const res = await req('/api/admin/countdowns', {
             method: 'POST',
-            cookie: await adminCookie(),
+            cookie: COOKIE,
             body: JSON.stringify({ event: 'X', startDate: '2026-02-31', endDate: '2026-03-01' }),
         });
         expect(res.status).toBe(400);
     });
 
     it('PATCH thiếu field KHÔNG xoá trắng field cũ', async () => {
-        const cookie = await adminCookie();
+        const cookie = COOKIE;
         const seeded = await seedEvent({ event: 'Cũ', description: 'Mô tả cũ' });
 
         const res = await req(`/api/admin/countdowns/${seeded.id}`, {
@@ -104,7 +113,7 @@ describe('CRUD countdown', () => {
     });
 
     it('PATCH chỉ startDate vẫn bị chặn nếu vượt qua endDate CŨ', async () => {
-        const cookie = await adminCookie();
+        const cookie = COOKIE;
         const seeded = await seedEvent({ startDate: '2026-09-01', endDate: '2026-09-10' });
         const res = await req(`/api/admin/countdowns/${seeded.id}`, {
             method: 'PATCH',
@@ -117,14 +126,14 @@ describe('CRUD countdown', () => {
     it('PATCH id không tồn tại → 404', async () => {
         const res = await req('/api/admin/countdowns/khong-co', {
             method: 'PATCH',
-            cookie: await adminCookie(),
+            cookie: COOKIE,
             body: JSON.stringify({ event: 'X' }),
         });
         expect(res.status).toBe(404);
     });
 
     it('xoá', async () => {
-        const cookie = await adminCookie();
+        const cookie = COOKIE;
         const seeded = await seedEvent();
         expect((await req(`/api/admin/countdowns/${seeded.id}`, { method: 'DELETE', cookie })).status).toBe(200);
         const { countdowns } = (await (await req('/api/admin/countdowns', { cookie })).json()) as { countdowns: unknown[] };
@@ -134,7 +143,7 @@ describe('CRUD countdown', () => {
 
 describe('nhật ký', () => {
     it('DELETE /logs dọn sạch bảng — bỏ dòng db.delete thì test này đỏ', async () => {
-        const cookie = await adminCookie();
+        const cookie = COOKIE;
         await env.assistant_db
             .prepare("INSERT INTO execution_logs (id, action_id, status, detail) VALUES (?, 'countdown.notify', 'ok', 'x')")
             .bind(crypto.randomUUID())
@@ -151,5 +160,106 @@ describe('nhật ký', () => {
 
     it('DELETE /logs không cookie → 401', async () => {
         expect((await req('/api/admin/logs', { method: 'DELETE' })).status).toBe(401);
+    });
+});
+
+describe('CRUD health-check', () => {
+    it('tạo, đọc lại, PATCH toggle, xoá', async () => {
+        const cookie = COOKIE;
+
+        const create = await req('/api/admin/healthchecks', {
+            method: 'POST',
+            cookie,
+            body: JSON.stringify({ label: 'API prod', url: 'https://api.example/health', checkScript: 'return "up"' }),
+        });
+        expect(create.status).toBe(201);
+        const { id } = (await create.json()) as { id: string };
+
+        const list = (await (await req('/api/admin/healthchecks', { cookie })).json()) as {
+            healthchecks: { id: string; label: string; url: string; enabled: boolean }[];
+        };
+        expect(list.healthchecks).toHaveLength(1);
+        expect(list.healthchecks[0]).toMatchObject({ label: 'API prod', url: 'https://api.example/health', enabled: true });
+
+        expect(
+            (await req(`/api/admin/healthchecks/${id}`, { method: 'PATCH', cookie, body: JSON.stringify({ enabled: false }) })).status,
+        ).toBe(200);
+        const after = (await (await req('/api/admin/healthchecks', { cookie })).json()) as {
+            healthchecks: { enabled: boolean }[];
+        };
+        expect(after.healthchecks[0].enabled).toBe(false);
+
+        expect((await req(`/api/admin/healthchecks/${id}`, { method: 'DELETE', cookie })).status).toBe(200);
+        const empty = (await (await req('/api/admin/healthchecks', { cookie })).json()) as { healthchecks: unknown[] };
+        expect(empty.healthchecks).toHaveLength(0);
+    });
+
+    it('thiếu label → 400', async () => {
+        const res = await req('/api/admin/healthchecks', {
+            method: 'POST',
+            cookie: COOKIE,
+            body: JSON.stringify({ url: 'https://x.example' }),
+        });
+        expect(res.status).toBe(400);
+        expect((await res.json() as { field: string }).field).toBe('label');
+    });
+
+    it('url không phải http(s) → 400 field url', async () => {
+        const cookie = COOKIE;
+        for (const url of ['ftp://x.example', 'not-a-url', 'javascript:alert(1)']) {
+            const res = await req('/api/admin/healthchecks', {
+                method: 'POST',
+                cookie,
+                body: JSON.stringify({ label: 'X', url }),
+            });
+            expect(res.status).toBe(400);
+            expect((await res.json() as { field: string }).field).toBe('url');
+        }
+    });
+
+    it('checkScript quá 4000 ký tự → 400', async () => {
+        const res = await req('/api/admin/healthchecks', {
+            method: 'POST',
+            cookie: COOKIE,
+            body: JSON.stringify({ label: 'X', url: 'https://x.example', checkScript: 'a'.repeat(4001) }),
+        });
+        expect(res.status).toBe(400);
+    });
+
+    it('PATCH id không tồn tại → 404', async () => {
+        const res = await req('/api/admin/healthchecks/khong-co', {
+            method: 'PATCH',
+            cookie: COOKIE,
+            body: JSON.stringify({ enabled: false }),
+        });
+        expect(res.status).toBe(404);
+    });
+});
+
+describe('cấu hình health-check', () => {
+    it('GET trả null khi chưa set; PUT rồi GET lại đúng giá trị', async () => {
+        const cookie = COOKIE;
+
+        const before = (await (await req('/api/admin/healthcheck-config', { cookie })).json()) as {
+            chatIdKey: string | null;
+            topicIdKey: string | null;
+            template: string | null;
+        };
+        expect(before).toEqual({ chatIdKey: null, topicIdKey: null, template: null });
+
+        await env.assistant_db.prepare("INSERT INTO variables (key, value) VALUES ('hc chat', '-100')").run();
+        const put = await req('/api/admin/healthcheck-config', {
+            method: 'PUT',
+            cookie,
+            body: JSON.stringify({ chatIdKey: 'hc chat', topicIdKey: null, template: '{stateEmoji} {label}' }),
+        });
+        expect(put.status).toBe(200);
+
+        const after = (await (await req('/api/admin/healthcheck-config', { cookie })).json()) as {
+            chatIdKey: string | null;
+            template: string | null;
+        };
+        expect(after.chatIdKey).toBe('hc chat');
+        expect(after.template).toBe('{stateEmoji} {label}');
     });
 });

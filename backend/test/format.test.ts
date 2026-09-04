@@ -89,7 +89,8 @@ describe('formatCountdownMessage với mẫu tuỳ chỉnh (header / body / foot
     it('body thay mọi tham số bằng giá trị của event', () => {
         const msg = formatCountdownMessage([row({ event: 'Ra mắt' })], '2026-09-19', { body: BODY })!;
         expect(msg).toContain('Ra mắt: còn 12 ngày');
-        expect(msg).toContain('[01/09/2026→01/10/2026]'); // start/end của event, không phải hôm nay
+        // '[' ']' literal trong mẫu được escape — start/end của event, không phải hôm nay.
+        expect(msg).toContain('\\[01/09/2026→01/10/2026\\]');
         expect(msg).toContain('40%'); // 12/30
     });
 
@@ -100,6 +101,14 @@ describe('formatCountdownMessage với mẫu tuỳ chỉnh (header / body / foot
         })!;
         // 30/7 = 4.29 · 18/7 = 2.57 · 100/30 = 3.33 — dấu chấm đều đã escape.
         expect(msg).toBe('T30/4\\.29 · Q18/2\\.57 · ngày 3\\.33%');
+    });
+
+    it('phần trăm đã qua: passedDaysPercent = passedWeeksPercent, dấu chấm được escape', () => {
+        // Chặng 3 ngày, đã qua 1 → 33.33%.
+        const msg = formatCountdownMessage([row({ startDate: '2026-09-01', endDate: '2026-09-04' })], '2026-09-02', {
+            body: '{passedDaysPercent} / {passedWeeksPercent}',
+        })!;
+        expect(msg).toBe('33\\.33 / 33\\.33');
     });
 
     it('có mẫu tuỳ chỉnh → KHÔNG còn dòng "⏳ Countdown" mặc định', () => {
@@ -119,9 +128,19 @@ describe('formatCountdownMessage với mẫu tuỳ chỉnh (header / body / foot
         expect(msg).toContain('*Deadline \\#1 \\(gấp\\!\\)*');
     });
 
-    it('tham số lạ giữ nguyên {tên} thay vì làm hỏng cả tin nhắn', () => {
+    it('tham số lạ giữ nguyên {tên} (đã escape) thay vì làm hỏng cả tin nhắn', () => {
         const msg = formatCountdownMessage([row()], '2026-09-19', { body: 'còn {remainDays} — {khongCoThamSoNay}' })!;
-        expect(msg).toContain('còn 12 — {khongCoThamSoNay}');
+        // '{' '}' được escape nên Telegram không trả 400 vì token gõ sai.
+        expect(msg).toContain('còn 12 — \\{khongCoThamSoNay\\}');
+    });
+
+    it('chữ literal trong mẫu tự escape -, (), ., ! nhưng vẫn để * in đậm (bug Telegram 400)', () => {
+        // Mẫu của admin dùng ' - ' làm dấu phân cách và '(...)' quanh câu — trước đây
+        // các ký tự này lọt raw sang Telegram và bị từ chối cả tin nhắn.
+        const msg = formatCountdownMessage([row({ event: 'A' })], '2026-09-19', {
+            body: '*{eventName}* - còn {remainDays} ngày (cố lên!).',
+        })!;
+        expect(msg).toBe('*A* \\- còn 12 ngày \\(cố lên\\!\\)\\.');
     });
 
     it('header ghép một lần ở đầu, footer một lần ở cuối; {today} và {count} được thay', () => {

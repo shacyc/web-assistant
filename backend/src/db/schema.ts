@@ -98,6 +98,55 @@ export const schedules = sqliteTable('schedules', {
     index('schedules_due_idx').on(table.enabled, table.timeOfDay),
 ]);
 
+// Health-check: theo dõi vài website "còn sống hay không". Cùng khuôn countdown — một
+// bảng dữ liệu (mỗi URL một dòng, bật/tắt được) + một bảng config một dòng trỏ tới key
+// chat/topic trong `variables`. Action `healthcheck.run` fetch mọi URL đang bật, so
+// trạng thái với `last_state`, CHỈ gửi Telegram khi state đổi (cả hai chiều: sập và
+// phục hồi). Xem `actions/healthcheck.ts` và `lib/healthcheck.ts`.
+export const healthcheckTargets = sqliteTable('healthcheck_targets', {
+    id: text('id').primaryKey(), // UUID
+    label: text('label').notNull(), // tên hiển thị, in đậm trong tin nhắn
+    url: text('url').notNull(), // http(s) — validate ở route, không phải ở đây
+
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+
+    // JS thân hàm admin tự viết để tự quyết định "sập hay không". Nhận MỘT tham số
+    // `probe` (dữ liệu thuần: url, status, ok, body, durationMs, error) và return một
+    // chuỗi state — 'up' = khoẻ, chuỗi khác = coi là sập. null = dùng luật mặc định
+    // (lỗi mạng / timeout / HTTP >= 400 → 'down'). Chạy bằng `new Function` với các
+    // global rủi ro (fetch, globalThis…) bị che thành undefined — KHÔNG phải sandbox
+    // thật, chấp nhận được vì chỉ admin (chủ dự án) viết được. Xem `lib/healthcheck.ts`.
+    checkScript: text('check_script'),
+
+    // 'up' | 'down' | chuỗi tuỳ hàm admin. null = chưa check lần nào. Đây là chốt để
+    // biết "state có đổi không" → có gửi Telegram không.
+    lastState: text('last_state'),
+    lastStateAt: integer('last_state_at', { mode: 'timestamp' }), // khi state hiện tại bắt đầu
+    lastCheckedAt: integer('last_checked_at', { mode: 'timestamp' }),
+    lastDetail: text('last_detail'), // 'HTTP 200 · 143ms' | 'timeout sau 10s' …
+
+    createdAt: integer('created_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+}, (table) => [
+    // Truy vấn nóng duy nhất: "URL nào đang bật" — cron quét mỗi 5 phút.
+    index('healthcheck_enabled_idx').on(table.enabled),
+]);
+
+// Bảng một dòng (id luôn = 1), cùng lý do với `countdown_config`: mỗi tính năng có
+// cấu hình riêng thay vì rải vào `variables`.
+export const healthcheckConfig = sqliteTable('healthcheck_config', {
+    id: integer('id').primaryKey(),
+    // Trỏ tới `variables.key`. Nullable = chưa cấu hình; `healthcheck.run` báo lỗi rõ
+    // ràng thay vì gửi nhầm chỗ. Không đặt foreign key — như countdown_config.
+    chatIdKey: text('chat_id_key'),
+    topicIdKey: text('topic_id_key'),
+    // Mẫu tin nhắn admin tự soạn, render một lần cho mỗi lần state đổi. Null/rỗng = dùng
+    // định dạng mặc định trong `telegram/healthcheckFormat.ts`. Chữ literal là markup
+    // admin tự chịu trách nhiệm escape; chỉ GIÁ TRỊ thay vào mới được auto-escape.
+    template: text('template'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
+});
+
 // Khi một AI bot tự ấn nút, đây là chỗ duy nhất trả lời được "hôm qua nó có chạy không,
 // gửi cái gì". Không có bảng này thì mọi lần debug đều phải đoán.
 export const executionLogs = sqliteTable('execution_logs', {

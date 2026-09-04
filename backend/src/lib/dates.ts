@@ -202,3 +202,8 @@ export function formatVN(date: string): string {
     const [y, m, d] = date.split('-');
     return `${d}/${m}/${y}`;
 }
+
+/** 'DD/MM/YYYY HH:MM' của `now` ở múi giờ đã cho — cho tin nhắn health-check ({checkedAt}). */
+export function formatVNDateTime(timeZone: string, now: Date = new Date()): string {
+    return `${formatVN(today(timeZone, now))} ${hhmm(timeZone, now)}`;
+}

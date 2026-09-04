@@ -4,6 +4,7 @@ import { Heading, Text } from '@astryxdesign/core/Text';
 import { Link } from '@astryxdesign/core/Link';
 import { PageBody } from '@/components/layout/PageBody';
 import { CountdownConfigForm } from './CountdownConfigForm';
+import { HealthCheckConfigForm } from './HealthCheckConfigForm';
 
 export function ConfigPage() {
     return (
@@ -19,6 +20,13 @@ export function ConfigPage() {
                 <VStack gap={5}>
                     <Heading level={2}>Countdown</Heading>
                     <CountdownConfigForm />
+                </VStack>
+            </Card>
+
+            <Card padding={8}>
+                <VStack gap={5}>
+                    <Heading level={2}>Health check</Heading>
+                    <HealthCheckConfigForm />
                 </VStack>
             </Card>
         </PageBody>

@@ -2,9 +2,9 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Save, Send, TriangleAlert, Copy, Check } from 'lucide-react';
 import {
     listVariables,
-    getCountdownConfig,
-    putCountdownConfig,
-    testCountdownConfig,
+    getHealthCheckConfig,
+    putHealthCheckConfig,
+    testHealthCheckConfig,
     ApiError,
     type Variable,
 } from '@/lib/apiClient';
@@ -31,35 +31,21 @@ const TEMPLATE_MAX = 4096;
 
 type Placeholder = { token: string; desc: string };
 
-// Dùng trong `header` / `footer` — ghép một lần, chỉ có thông tin toàn cục.
-const ONCE_PLACEHOLDERS: Placeholder[] = [
-    { token: '{today}', desc: 'Hôm nay, dd/MM/yyyy' },
-    { token: '{count}', desc: 'Số sự kiện đang chạy' },
+// Thay theo từng lần state đổi; chữ còn lại trong mẫu giữ nguyên.
+const PLACEHOLDERS: Placeholder[] = [
+    { token: '{label}', desc: 'Tên site' },
+    { token: '{url}', desc: 'URL' },
+    { token: '{state}', desc: "Trạng thái mới ('up' / 'down' / chuỗi của checkScript)" },
+    { token: '{previousState}', desc: 'Trạng thái trước đó' },
+    { token: '{stateEmoji}', desc: '🟢 nếu state mới = up, 🔴 nếu khác' },
+    { token: '{statusCode}', desc: "Mã HTTP, hoặc '—' nếu lỗi mạng" },
+    { token: '{statusLine}', desc: "'HTTP 503' hoặc 'Lỗi: <câu lỗi mạng>'" },
+    { token: '{error}', desc: "Câu lỗi mạng/timeout, hoặc '—'" },
+    { token: '{durationMs}', desc: 'Thời gian phản hồi (ms)' },
+    { token: '{checkedAt}', desc: 'Lúc kiểm, DD/MM/YYYY HH:MM' },
 ];
 
-// Dùng trong mẫu nội dung — thay theo từng sự kiện đang chạy; chữ còn lại giữ nguyên.
-const BODY_PLACEHOLDERS: Placeholder[] = [
-    { token: '{eventName}', desc: 'Tên sự kiện' },
-    { token: '{startDate}', desc: 'Ngày bắt đầu, dd/MM/yyyy' },
-    { token: '{endDate}', desc: 'Ngày kết thúc, dd/MM/yyyy' },
-    { token: '{totalDays}', desc: 'Tổng số ngày của chặng' },
-    { token: '{totalWeeks}', desc: 'Tổng số tuần của chặng (2 số lẻ)' },
-    { token: '{passedDays}', desc: 'Số ngày đã qua' },
-    { token: '{passedWeeks}', desc: 'Số tuần đã qua (2 số lẻ)' },
-    { token: '{passedDaysPercent}', desc: 'Phần trăm chặng đã qua (2 số lẻ)' },
-    { token: '{passedWeeksPercent}', desc: 'Như trên, tính theo tuần' },
-    { token: '{remainDays}', desc: 'Số ngày còn lại' },
-    { token: '{remainWeeks}', desc: 'Số tuần còn lại (2 số lẻ)' },
-    { token: '{remainDaysPercent}', desc: 'Phần trăm chặng còn lại (2 số lẻ)' },
-    { token: '{remainWeeksPercent}', desc: 'Như trên, tính theo tuần' },
-    { token: '{dailyPercent}', desc: 'Mỗi ngày trôi qua mất bao nhiêu % (2 số lẻ)' },
-    { token: '{progress}', desc: 'Thanh tiến độ ▓▓░░' },
-    { token: '{today}', desc: 'Hôm nay, dd/MM/yyyy' },
-];
-
-const HEADER_EXAMPLE = '📅 Countdown {today} — {count} sự kiện';
-const BODY_EXAMPLE = '*{eventName}*\nCòn {remainDays} ngày ({remainWeeksPercent}%)\n{progress}';
-const FOOTER_EXAMPLE = '_Cập nhật tự động_';
+const TEMPLATE_EXAMPLE = '{stateEmoji} *{label}*\n{url}\n{previousState} → {state} · {statusLine}\n{checkedAt}';
 
 /** Danh sách tham số — ấn vào tên để copy, rê chuột để xem mô tả. */
 function TokenList({ items }: { items: Placeholder[] }) {
@@ -95,16 +81,14 @@ interface Props {
 }
 
 /**
- * Form cấu hình countdown: key chat/topic + ba mảnh mẫu tin nhắn. Tự nạp dữ liệu, tự
- * lưu. Dùng chung cho màn Cấu hình (nhúng thẳng) và dialog trong màn Countdown.
+ * Form cấu hình health-check: key chat/topic + mẫu tin nhắn. Tự nạp, tự lưu. Dùng chung
+ * cho màn Cấu hình (nhúng thẳng) và dialog trong màn Health check.
  */
-export function CountdownConfigForm({ onSaved, autoFocus }: Props) {
+export function HealthCheckConfigForm({ onSaved, autoFocus }: Props) {
     const [vars, setVars] = useState<Variable[] | null>(null);
     const [chatIdKey, setChatIdKey] = useState('');
     const [topicIdKey, setTopicIdKey] = useState('');
-    const [header, setHeader] = useState('');
     const [template, setTemplate] = useState('');
-    const [footer, setFooter] = useState('');
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [testing, setTesting] = useState(false);
@@ -112,14 +96,12 @@ export function CountdownConfigForm({ onSaved, autoFocus }: Props) {
     const [notice, setNotice] = useState<string | null>(null);
 
     useEffect(() => {
-        Promise.all([listVariables(), getCountdownConfig()])
+        Promise.all([listVariables(), getHealthCheckConfig()])
             .then(([{ variables }, cfg]) => {
                 setVars(variables);
                 setChatIdKey(cfg.chatIdKey ?? '');
                 setTopicIdKey(cfg.topicIdKey ?? '');
-                setHeader(cfg.header ?? '');
                 setTemplate(cfg.template ?? '');
-                setFooter(cfg.footer ?? '');
             })
             .catch((err) => setError(err instanceof ApiError ? err.message : 'Không tải được cấu hình'))
             .finally(() => setLoading(false));
@@ -142,14 +124,12 @@ export function CountdownConfigForm({ onSaved, autoFocus }: Props) {
         setError(null);
         setNotice(null);
         try {
-            await putCountdownConfig({
+            await putHealthCheckConfig({
                 chatIdKey: chatIdKey || null,
                 topicIdKey: topicIdKey || null,
-                header: header.trim() || null,
                 template: template.trim() || null,
-                footer: footer.trim() || null,
             });
-            setNotice('Đã lưu cấu hình countdown');
+            setNotice('Đã lưu cấu hình health-check');
             onSaved?.();
         } catch (err) {
             setError(err instanceof ApiError ? err.message : 'Lưu thất bại');
@@ -158,18 +138,18 @@ export function CountdownConfigForm({ onSaved, autoFocus }: Props) {
         }
     }
 
-    // Gửi thử NGAY bằng cấu hình đang LƯU (không phải nội dung đang gõ dở) — bấm Lưu trước
-    // nếu muốn thử bản vừa sửa. `summary` mô tả kết quả: đã gửi / không có sự kiện / lỗi.
+    // Chạy thử NGAY bằng cấu hình đang LƯU (không phải nội dung đang gõ dở). `summary`
+    // mô tả kết quả: đã gửi mấy thông báo / không có gì đổi / lỗi.
     async function runTest() {
         setTesting(true);
         setError(null);
         setNotice(null);
         try {
-            const res = await testCountdownConfig();
+            const res = await testHealthCheckConfig();
             if (res.ok) setNotice(res.summary);
             else setError(res.summary);
         } catch (err) {
-            setError(err instanceof ApiError ? err.message : 'Gửi thử thất bại');
+            setError(err instanceof ApiError ? err.message : 'Chạy thử thất bại');
         } finally {
             setTesting(false);
         }
@@ -229,53 +209,29 @@ export function CountdownConfigForm({ onSaved, autoFocus }: Props) {
                 <VStack gap={2}>
                     <Text type="label" color="primary">Mẫu tin nhắn</Text>
                     <Text type="supporting" color="secondary">
-                        Cả ba để trống = dùng mẫu mặc định. Mảnh nào để trống thì không ghép vào tin nhắn.
+                        Để trống = dùng mẫu mặc định. Render một lần cho mỗi lần một site đổi trạng thái.
                         Ấn vào tên tham số để copy.
                     </Text>
 
                     <TextArea
-                        label="Tiêu đề (header)"
-                        description="Ghép một lần ở đầu tin nhắn."
-                        placeholder={HEADER_EXAMPLE}
-                        value={header}
-                        onChange={setHeader}
-                        rows={2}
-                        maxLength={TEMPLATE_MAX}
-                        hasSpellCheck={false}
-                        hasAutoFocus={autoFocus}
-                    />
-                    <TokenList items={ONCE_PLACEHOLDERS} />
-
-                    <TextArea
-                        label="Nội dung mỗi sự kiện (body)"
-                        description="Render một lần cho mỗi sự kiện đang chạy."
-                        placeholder={BODY_EXAMPLE}
+                        label="Nội dung"
+                        description="Gửi mỗi khi một site chuyển sang sập hoặc phục hồi."
+                        placeholder={TEMPLATE_EXAMPLE}
                         value={template}
                         onChange={setTemplate}
                         rows={6}
                         maxLength={TEMPLATE_MAX}
                         hasSpellCheck={false}
+                        hasAutoFocus={autoFocus}
                     />
-                    <TokenList items={BODY_PLACEHOLDERS} />
-
-                    <TextArea
-                        label="Chân (footer)"
-                        description="Ghép một lần ở cuối tin nhắn."
-                        placeholder={FOOTER_EXAMPLE}
-                        value={footer}
-                        onChange={setFooter}
-                        rows={2}
-                        maxLength={TEMPLATE_MAX}
-                        hasSpellCheck={false}
-                    />
-                    <TokenList items={ONCE_PLACEHOLDERS} />
+                    <TokenList items={PLACEHOLDERS} />
                 </VStack>
 
                 {!chatIdKey && (
                     <HStack gap={2} vAlign="center">
                         <Icon icon={TriangleAlert} size="sm" color="warning" />
                         <Text type="supporting" color="secondary">
-                            Chưa chọn key chat ID — countdown.notify sẽ báo lỗi thay vì gửi.
+                            Chưa chọn key chat ID — healthcheck.run sẽ báo lỗi thay vì gửi.
                         </Text>
                     </HStack>
                 )}
@@ -291,7 +247,7 @@ export function CountdownConfigForm({ onSaved, autoFocus }: Props) {
                     />
                     <Button
                         type="button"
-                        label={testing ? 'Đang gửi…' : 'Gửi thử'}
+                        label={testing ? 'Đang chạy…' : 'Chạy thử'}
                         variant="secondary"
                         onClick={runTest}
                         isLoading={testing}

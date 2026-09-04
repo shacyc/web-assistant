@@ -23,6 +23,8 @@ beforeEach(async () => {
     await env.assistant_db.exec('DELETE FROM variables');
     await env.assistant_db.exec('DELETE FROM countdown_config');
     await env.assistant_db.exec('DELETE FROM schedules');
+    await env.assistant_db.exec('DELETE FROM healthcheck_targets');
+    await env.assistant_db.exec('DELETE FROM healthcheck_config');
 });
 
 export { SELF };
@@ -100,6 +102,141 @@ export function mockTelegram(): TelegramMock {
             globalThis.fetch = original;
         },
     };
+}
+
+export interface StubResponse {
+    status?: number; // mặc định 200
+    body?: string; // mặc định ''
+    /** Ném lỗi mạng thay vì trả response (kiểm nhánh site không kết nối được). */
+    throw?: string;
+}
+
+export interface HttpMock {
+    /** Call Telegram sendMessage, theo thứ tự. */
+    readonly telegram: TelegramCall[];
+    /** URL (không phải Telegram) đã bị fetch, theo thứ tự. */
+    readonly fetched: string[];
+    /** Đăng ký response giả cho một URL health-check. Khớp đúng URL hoặc theo RegExp. */
+    on(match: string | RegExp, res: StubResponse): void;
+    /** Ép lần gọi Telegram kế tiếp trả lỗi. */
+    failNextTelegram(status: number, body: unknown): void;
+    restore(): void;
+}
+
+/**
+ * Như `mockTelegram()` nhưng còn giả lập được các URL health-check. Giữ nguyên tính
+ * chất cốt lõi: **URL không phải Telegram và chưa `on()` → ném lỗi** (không rò request
+ * ra ngoài trong test). `healthcheck.run` fetch URL bất kỳ nên cần cái này thay cho
+ * `mockTelegram()`.
+ */
+export function mockHttp(): HttpMock {
+    const original = globalThis.fetch;
+    const telegram: TelegramCall[] = [];
+    const fetched: string[] = [];
+    const stubs: { match: string | RegExp; res: StubResponse }[] = [];
+    let tgFailure: { status: number; body: unknown } | null = null;
+
+    const tgPrefix = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input instanceof Request ? input.url : input);
+
+        if (url.startsWith(tgPrefix)) {
+            telegram.push(JSON.parse(String(init?.body ?? (input as Request).body)) as TelegramCall);
+            const f = tgFailure;
+            tgFailure = null;
+            return new Response(JSON.stringify(f ? f.body : { ok: true }), {
+                status: f ? f.status : 200,
+                headers: { 'content-type': 'application/json' },
+            });
+        }
+
+        fetched.push(url);
+        const stub = stubs.find((s) => (typeof s.match === 'string' ? s.match === url : s.match.test(url)));
+        if (!stub) throw new Error(`Request ra ngoài ngoài dự kiến trong test: ${url}`);
+        if (stub.res.throw) throw new Error(stub.res.throw);
+        return new Response(stub.res.body ?? '', { status: stub.res.status ?? 200 });
+    }) as typeof fetch;
+
+    return {
+        telegram,
+        fetched,
+        on: (match, res) => stubs.push({ match, res }),
+        failNextTelegram: (status, body) => {
+            tgFailure = { status, body };
+        },
+        restore: () => {
+            globalThis.fetch = original;
+        },
+    };
+}
+
+export interface HealthTargetOverrides {
+    id?: string;
+    label?: string;
+    url?: string;
+    enabled?: number;
+    checkScript?: string | null;
+    lastState?: string | null;
+    lastStateAt?: Date | null;
+    lastCheckedAt?: Date | null;
+    lastDetail?: string | null;
+}
+
+/** Đặt một dòng vào `healthcheck_targets`. */
+export async function seedHealthTarget(over: HealthTargetOverrides = {}) {
+    const row = {
+        id: over.id ?? crypto.randomUUID(),
+        label: over.label ?? 'Site',
+        url: over.url ?? 'https://site.example/health',
+        enabled: over.enabled ?? 1,
+        checkScript: over.checkScript ?? null,
+        lastState: over.lastState ?? null,
+        lastStateAt: over.lastStateAt ? Math.floor(over.lastStateAt.getTime() / 1000) : null,
+        lastCheckedAt: over.lastCheckedAt ? Math.floor(over.lastCheckedAt.getTime() / 1000) : null,
+        lastDetail: over.lastDetail ?? null,
+    };
+    await env.assistant_db
+        .prepare(
+            'INSERT INTO healthcheck_targets (id, label, url, enabled, check_script, last_state, last_state_at, last_checked_at, last_detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        .bind(
+            row.id,
+            row.label,
+            row.url,
+            row.enabled,
+            row.checkScript,
+            row.lastState,
+            row.lastStateAt,
+            row.lastCheckedAt,
+            row.lastDetail,
+        )
+        .run();
+    return row;
+}
+
+/** Trỏ `healthcheck_config` tới key cho trước + seed giá trị. Mặc định dựng cấu hình chạy được. */
+export async function seedHealthConfig(
+    over: {
+        chatIdKey?: string;
+        chatId?: string;
+        topicIdKey?: string | null;
+        topicId?: string;
+        template?: string | null;
+    } = {},
+) {
+    const chatIdKey = over.chatIdKey ?? 'secretary telegram chat id';
+    const topicIdKey = over.topicIdKey === undefined ? 'secretary daily topic id' : over.topicIdKey;
+    const template = over.template ?? null;
+    if (over.chatId !== undefined) await seedVariable(chatIdKey, over.chatId);
+    if (topicIdKey && over.topicId !== undefined) await seedVariable(topicIdKey, over.topicId);
+    await env.assistant_db
+        .prepare(
+            'INSERT INTO healthcheck_config (id, chat_id_key, topic_id_key, template) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET chat_id_key = excluded.chat_id_key, topic_id_key = excluded.topic_id_key, template = excluded.template',
+        )
+        .bind(chatIdKey, topicIdKey, template)
+        .run();
+    return { chatIdKey, topicIdKey, template };
 }
 
 export interface SeedOverrides {

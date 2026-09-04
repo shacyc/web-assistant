@@ -12,7 +12,6 @@ import {
 import { HStack, VStack } from '@astryxdesign/core/Stack';
 import { Heading, Text } from '@astryxdesign/core/Text';
 import { Button } from '@astryxdesign/core/Button';
-import { Badge } from '@astryxdesign/core/Badge';
 import { Switch } from '@astryxdesign/core/Switch';
 import { Icon } from '@astryxdesign/core/Icon';
 import { Spinner } from '@astryxdesign/core/Spinner';
@@ -177,20 +176,25 @@ export function SchedulesPage() {
             ),
         },
         {
+            // Không còn badge trạng thái riêng: chính ngày giờ đổi màu — xanh nếu lần chạy
+            // gần nhất thành công, đỏ nếu lỗi. Chi tiết lỗi vẫn xem ở màn Nhật ký.
             key: 'lastRun',
             header: 'Chạy gần nhất',
             width: pixel(150),
             renderCell: (row) =>
                 row.lastRunAt ? (
-                    <VStack gap={1}>
-                        <Text type="supporting" color="secondary" hasTabularNumbers>
-                            {new Date(row.lastRunAt).toLocaleString('vi-VN')}
-                        </Text>
-                        <Badge
-                            variant={row.lastRunStatus === 'ok' ? 'success' : 'error'}
-                            label={row.lastRunStatus ?? '—'}
-                        />
-                    </VStack>
+                    <Text
+                        type="supporting"
+                        hasTabularNumbers
+                        style={{
+                            color:
+                                row.lastRunStatus === 'ok'
+                                    ? 'var(--color-text-green)'
+                                    : 'var(--color-text-red)',
+                        }}
+                    >
+                        {new Date(row.lastRunAt).toLocaleString('vi-VN')}
+                    </Text>
                 ) : (
                     <Text type="supporting" color="secondary">
                         chưa chạy

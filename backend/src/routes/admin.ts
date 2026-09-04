@@ -4,7 +4,15 @@ import { eq, desc, asc } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import * as schema from '../db/schema';
-import { countdownEvents, executionLogs, variables, countdownConfig, schedules } from '../db/schema';
+import {
+    countdownEvents,
+    executionLogs,
+    variables,
+    countdownConfig,
+    schedules,
+    healthcheckTargets,
+    healthcheckConfig,
+} from '../db/schema';
 import type { Env } from '../types';
 import { fail, invalidBody, serverError } from '../lib/respond';
 import { Body } from '../lib/validate';
@@ -68,8 +76,13 @@ adminRoutes.use('/me', requireAdmin());
 adminRoutes.use('/variables', requireAdmin());
 adminRoutes.use('/variables/*', requireAdmin());
 adminRoutes.use('/countdown-config', requireAdmin());
+adminRoutes.use('/countdown-config/*', requireAdmin());
 adminRoutes.use('/schedules', requireAdmin());
 adminRoutes.use('/schedules/*', requireAdmin());
+adminRoutes.use('/healthchecks', requireAdmin());
+adminRoutes.use('/healthchecks/*', requireAdmin());
+adminRoutes.use('/healthcheck-config', requireAdmin());
+adminRoutes.use('/healthcheck-config/*', requireAdmin());
 
 adminRoutes.get('/me', (c) => c.json({ ok: true, mode: c.env.ADMIN_AUTH_MODE }));
 
@@ -340,6 +353,173 @@ adminRoutes.put('/countdown-config', async (c) => {
         return c.json({ ok: true });
     } catch (err) {
         return serverError(c, err, 'admin.countdownConfig.put');
+    }
+});
+
+// Gửi thử NGAY: chạy countdown.notify với dryRun=false, dùng đúng cấu hình đang lưu. Ghi
+// execution_logs với tiền tố '[test]'. Luôn 200 kèm {ok, summary} để UI hiện kết quả
+// (đã gửi / không có sự kiện / lỗi Telegram) thay vì nuốt vào ApiError.
+adminRoutes.post('/countdown-config/test', async (c) => {
+    const db = drizzle(c.env.assistant_db, { schema });
+    try {
+        const outcome = await runActionById(db, c.env, 'countdown.notify', { dryRun: false }, '[test]');
+        return c.json(outcome);
+    } catch (err) {
+        return serverError(c, err, 'admin.countdownConfig.test');
+    }
+});
+
+/* ---------- Health-check: danh sách URL + cấu hình gửi ---------- */
+
+// Thân hàm JS admin viết. Trần để một dòng không nuốt hết 10ms CPU lúc `new Function`
+// dựng + chạy nó mỗi 5 phút.
+const SCRIPT_MAX = 4000;
+const URL_MAX = 2000;
+
+adminRoutes.get('/healthchecks', async (c) => {
+    const db = drizzle(c.env.assistant_db, { schema });
+    const rows = await db.select().from(healthcheckTargets).orderBy(asc(healthcheckTargets.label));
+    return c.json({ healthchecks: rows });
+});
+
+// Kiểm tra ngay từ màn danh sách: chạy healthcheck.run thật (dryRun=false) như một nhịp
+// cron thủ công — cập nhật last_state, gửi Telegram nếu có site đổi trạng thái. Ghi
+// execution_logs với tiền tố '[chạy tay]'. Luôn 200 kèm {ok, summary} để UI hiện kết quả.
+adminRoutes.post('/healthchecks/run', async (c) => {
+    const db = drizzle(c.env.assistant_db, { schema });
+    try {
+        const outcome = await runActionById(db, c.env, 'healthcheck.run', { dryRun: false }, '[chạy tay]');
+        return c.json(outcome);
+    } catch (err) {
+        return serverError(c, err, 'admin.healthcheck.run');
+    }
+});
+
+adminRoutes.post('/healthchecks', async (c) => {
+    let raw: unknown;
+    try {
+        raw = await c.req.json();
+    } catch {
+        return fail(c, 400, 'INVALID_BODY', 'Body phải là JSON');
+    }
+
+    const f = new Body(raw);
+    const label = f.requiredString('label', 200);
+    const url = f.requiredUrl('url', URL_MAX);
+    const checkScript = f.optionalString('checkScript', SCRIPT_MAX);
+    const enabled = f.optionalBoolean('enabled');
+    if (f.error) return invalidBody(c, f.error);
+
+    try {
+        const db = drizzle(c.env.assistant_db, { schema });
+        const id = crypto.randomUUID();
+        await db.insert(healthcheckTargets).values({
+            id,
+            label,
+            url,
+            checkScript: checkScript ?? null,
+            enabled: enabled ?? true,
+        });
+        return c.json({ id }, 201);
+    } catch (err) {
+        return serverError(c, err, 'admin.healthcheck.create');
+    }
+});
+
+adminRoutes.patch('/healthchecks/:id', async (c) => {
+    const id = c.req.param('id');
+    let raw: unknown;
+    try {
+        raw = await c.req.json();
+    } catch {
+        return fail(c, 400, 'INVALID_BODY', 'Body phải là JSON');
+    }
+
+    const db = drizzle(c.env.assistant_db, { schema });
+    const [existing] = await db.select().from(healthcheckTargets).where(eq(healthcheckTargets.id, id)).limit(1);
+    if (!existing) return fail(c, 404, 'NOT_FOUND', 'Không có site này');
+
+    const f = new Body(raw);
+    // `undefined` = không gửi = giữ nguyên (drizzle bỏ qua undefined trong .set()).
+    const patch = {
+        label: raw && typeof raw === 'object' && 'label' in raw ? f.requiredString('label', 200) : undefined,
+        // Cột `url` NOT NULL — null (gửi tường minh) coi như không gửi, giữ nguyên.
+        url: f.optionalUrl('url', URL_MAX) ?? undefined,
+        checkScript: f.optionalString('checkScript', SCRIPT_MAX),
+        enabled: f.optionalBoolean('enabled'),
+    };
+    if (f.error) return invalidBody(c, f.error);
+
+    try {
+        await db
+            .update(healthcheckTargets)
+            .set({ ...patch, updatedAt: new Date() })
+            .where(eq(healthcheckTargets.id, id));
+        return c.json({ ok: true });
+    } catch (err) {
+        return serverError(c, err, 'admin.healthcheck.update', { id });
+    }
+});
+
+adminRoutes.delete('/healthchecks/:id', async (c) => {
+    const id = c.req.param('id');
+    try {
+        const db = drizzle(c.env.assistant_db, { schema });
+        await db.delete(healthcheckTargets).where(eq(healthcheckTargets.id, id));
+        return c.json({ ok: true });
+    } catch (err) {
+        return serverError(c, err, 'admin.healthcheck.delete', { id });
+    }
+});
+
+adminRoutes.get('/healthcheck-config', async (c) => {
+    const db = drizzle(c.env.assistant_db, { schema });
+    const [row] = await db.select().from(healthcheckConfig).where(eq(healthcheckConfig.id, 1)).limit(1);
+    return c.json({
+        chatIdKey: row?.chatIdKey ?? null,
+        topicIdKey: row?.topicIdKey ?? null,
+        template: row?.template ?? null,
+    });
+});
+
+adminRoutes.put('/healthcheck-config', async (c) => {
+    let raw: unknown;
+    try {
+        raw = await c.req.json();
+    } catch {
+        return fail(c, 400, 'INVALID_BODY', 'Body phải là JSON');
+    }
+    const f = new Body(raw);
+    // Bảng một dòng: vắng mặt hay null đều = bỏ chọn.
+    const chatIdKey = f.optionalString('chatIdKey', KEY_MAX) ?? null;
+    const topicIdKey = f.optionalString('topicIdKey', KEY_MAX) ?? null;
+    const template = f.optionalString('template', TEMPLATE_MAX) ?? null;
+    if (f.error) return invalidBody(c, f.error);
+
+    try {
+        const db = drizzle(c.env.assistant_db, { schema });
+        await db
+            .insert(healthcheckConfig)
+            .values({ id: 1, chatIdKey, topicIdKey, template })
+            .onConflictDoUpdate({
+                target: healthcheckConfig.id,
+                set: { chatIdKey, topicIdKey, template, updatedAt: new Date() },
+            });
+        return c.json({ ok: true });
+    } catch (err) {
+        return serverError(c, err, 'admin.healthcheckConfig.put');
+    }
+});
+
+// Chạy healthcheck.run NGAY bằng cấu hình đang lưu (dryRun=false). Ghi execution_logs
+// với tiền tố '[test]'. Luôn 200 kèm {ok, summary} để UI hiện kết quả.
+adminRoutes.post('/healthcheck-config/test', async (c) => {
+    const db = drizzle(c.env.assistant_db, { schema });
+    try {
+        const outcome = await runActionById(db, c.env, 'healthcheck.run', { dryRun: false }, '[test]');
+        return c.json(outcome);
+    } catch (err) {
+        return serverError(c, err, 'admin.healthcheckConfig.test');
     }
 });
 
