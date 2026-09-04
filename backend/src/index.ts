@@ -5,8 +5,8 @@ import * as schema from './db/schema';
 import { schedules } from './db/schema';
 import type { Bindings, Env } from './types';
 import { fail, serverError } from './lib/respond';
-import { hhmm, today } from './lib/dates';
-import { isDue, parsePayload } from './lib/schedule';
+import { hhmm, today, slotKeyUTC, zonedParts } from './lib/dates';
+import { isDueStructured, isDueCron, isDueEvery, parsePayload } from './lib/schedule';
 import { runActionById } from './actions/run';
 import { botRoutes } from './routes/bot';
 import { adminRoutes } from './routes/admin';
@@ -40,50 +40,84 @@ export default {
     /**
      * Cron thật (wrangler.jsonc `triggers.crons`) bắn mỗi 5 phút, GIỜ UTC. Nó KHÔNG
      * hardcode việc gì: đọc bảng `schedules` — admin sửa qua /admin/schedules mà không
-     * cần deploy — rồi chạy job nào tới giờ mà hôm nay chưa chạy.
+     * cần deploy — rồi chạy job nào tới lượt.
      *
-     * Mỗi lần bắn là 1 request tính vào hạn mức, và handler này có 10ms CPU trên Free.
-     * Vì vậy: lọc "đang bật + đã tới giờ" ngay trong SQL, phần còn lại chạy tuần tự và
-     * nhẹ (query D1 + fetch Telegram là thời gian mạng, không phải CPU).
+     * `event.scheduledTime` là mốc nhịp dự kiến (0,5,10,… phút), ổn định hơn `Date.now()`
+     * nên dùng nó làm "bây giờ" cho việc so lịch. Bốn kiểu lặp có cấu trúc chốt theo
+     * `last_run_date` (mỗi ngày một lần); `cron` chốt theo `last_run_slot` (mỗi nhịp 5
+     * phút); `every` chốt theo `last_run_at` (đủ khoảng thời gian trôi qua chưa).
+     * `last_run_at` luôn ghi = mốc nhịp (không phải lúc chạy xong) để khoảng của `every`
+     * không trôi khỏi lưới 5 phút.
+     *
+     * Mỗi lần bắn là 1 request và handler có 10ms CPU trên Free. Lọc `enabled` trong SQL;
+     * số dòng lịch của một bot cá nhân đủ nhỏ để xét phần còn lại trong JS.
      */
-    async scheduled(_event: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
+    async scheduled(event: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
         const db = drizzle(env.assistant_db, { schema });
-        const todayStr = today(env.TIMEZONE);
-        const nowHHMM = hhmm(env.TIMEZONE);
+        const now = new Date(event.scheduledTime || Date.now());
+        const todayStr = today(env.TIMEZONE, now);
+        const nowHHMM = hhmm(env.TIMEZONE, now);
+        const slot = slotKeyUTC(now);
+        const parts = zonedParts(env.TIMEZONE, now);
 
-        const candidates = await db
-            .select()
-            .from(schedules)
-            .where(and(eq(schedules.enabled, true), lte(schedules.timeOfDay, nowHHMM)));
+        const rows = await db.select().from(schedules).where(eq(schedules.enabled, true));
 
-        for (const row of candidates) {
-            // `isDue` lặp lại điều kiện SQL + thêm chốt "chưa chạy hôm nay". Giữ cả hai:
-            // SQL để không kéo về những dòng chắc chắn không chạy, `isDue` để logic đầy
-            // đủ nằm một chỗ test được.
-            if (!isDue(row, todayStr, nowHHMM)) continue;
-
-            // Chốt quyền chạy bằng UPDATE có điều kiện: hai lần cron chồng nhau (hiếm,
-            // nhưng có thể) thì chỉ một cái đổi được last_run_date sang hôm nay; cái kia
-            // thấy changes = 0 và bỏ qua. Ghi last_run_date TRƯỚC khi chạy nên job lỗi
-            // không tự thử lại trong ngày — đổi lấy việc không bao giờ gửi trùng.
-            const claim = await db
-                .update(schedules)
-                .set({ lastRunDate: todayStr, updatedAt: new Date() })
-                .where(
-                    and(
-                        eq(schedules.id, row.id),
-                        or(isNull(schedules.lastRunDate), ne(schedules.lastRunDate, todayStr)),
-                    ),
-                );
-            if ((claim.meta?.changes ?? 0) === 0) continue;
+        for (const row of rows) {
+            // Chốt quyền chạy bằng UPDATE có điều kiện: hai lần cron chồng nhau (hiếm
+            // nhưng có thể) thì chỉ một cái đổi được cột chốt; cái kia thấy changes = 0
+            // và bỏ qua. Ghi chốt TRƯỚC khi chạy nên job lỗi không tự thử lại — đổi lấy
+            // việc không bao giờ gửi trùng.
+            let claimed: boolean;
+            if (row.kind === 'cron') {
+                if (!isDueCron(row, parts, slot)) continue;
+                const claim = await db
+                    .update(schedules)
+                    .set({ lastRunSlot: slot, lastRunAt: now, updatedAt: new Date() })
+                    .where(
+                        and(
+                            eq(schedules.id, row.id),
+                            or(isNull(schedules.lastRunSlot), ne(schedules.lastRunSlot, slot)),
+                        ),
+                    );
+                claimed = (claim.meta?.changes ?? 0) > 0;
+            } else if (row.kind === 'every') {
+                if (!isDueEvery(row, now)) continue;
+                // Chốt = "last_run_at đủ cũ": chỉ một invocation đổi được, phần còn lại
+                // thấy changes = 0. Ngưỡng tính bằng ms rồi để drizzle quy về giây.
+                const threshold = new Date(now.getTime() - (row.intervalSeconds ?? 0) * 1000);
+                const claim = await db
+                    .update(schedules)
+                    .set({ lastRunAt: now, updatedAt: new Date() })
+                    .where(
+                        and(
+                            eq(schedules.id, row.id),
+                            or(isNull(schedules.lastRunAt), lte(schedules.lastRunAt, threshold)),
+                        ),
+                    );
+                claimed = (claim.meta?.changes ?? 0) > 0;
+            } else {
+                if (!isDueStructured(row, todayStr, nowHHMM)) continue;
+                const claim = await db
+                    .update(schedules)
+                    .set({ lastRunDate: todayStr, lastRunAt: now, updatedAt: new Date() })
+                    .where(
+                        and(
+                            eq(schedules.id, row.id),
+                            or(isNull(schedules.lastRunDate), ne(schedules.lastRunDate, todayStr)),
+                        ),
+                    );
+                claimed = (claim.meta?.changes ?? 0) > 0;
+            }
+            if (!claimed) continue;
 
             const outcome = await runActionById(db, env, row.actionId, parsePayload(row.payload), '[cron]');
-            console.log(`[cron] ${row.actionId} @ ${row.timeOfDay}:`, outcome.summary);
+            console.log(`[cron] ${row.actionId} (${row.kind}):`, outcome.summary);
 
+            // KHÔNG đụng last_run_at ở đây — claim đã ghi = mốc nhịp; ghi đè bằng lúc
+            // chạy xong sẽ làm khoảng của 'every' trôi thêm vài giây mỗi vòng.
             await db
                 .update(schedules)
                 .set({
-                    lastRunAt: new Date(),
                     lastRunStatus: outcome.ok ? 'ok' : 'error',
                     lastRunDetail: outcome.summary.slice(0, 500),
                     updatedAt: new Date(),

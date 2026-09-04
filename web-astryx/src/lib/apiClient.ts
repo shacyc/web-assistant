@@ -169,6 +169,11 @@ export const importVariables = (mode: ImportMode, variables: Record<string, stri
 export interface CountdownConfig {
     chatIdKey: string | null;
     topicIdKey: string | null;
+    // Ba mảnh mẫu tin nhắn admin tự soạn. Null/rỗng = không ghép mảnh đó; cả ba null = mẫu
+    // mặc định. `header`/`footer` ghép một lần ({today}, {count}); `template` mỗi sự kiện.
+    header: string | null;
+    template: string | null;
+    footer: string | null;
 }
 
 export const getCountdownConfig = () => request<CountdownConfig>('GET', '/admin/countdown-config');
@@ -178,14 +183,24 @@ export const putCountdownConfig = (cfg: CountdownConfig) =>
 
 /* ---------- Lịch chạy tự động ---------- */
 
+export type ScheduleKind = 'daily' | 'weekly' | 'monthly' | 'interval' | 'cron' | 'every';
+
 export interface Schedule {
     id: string;
     actionId: string;
     // JSON đã stringify (bảng lưu TEXT). Form dựng lại từ đây; nơi khác chỉ hiển thị.
     payload: string;
-    timeOfDay: string; // 'HH:MM' theo giờ VN
+    kind: ScheduleKind;
+    timeOfDay: string; // 'HH:MM' theo giờ VN — kiểu 'cron' không dùng (lưu '00:00')
+    daysOfWeek: string | null; // CSV ISO '1,3,5' (1 = Thứ Hai), kiểu 'weekly'
+    dayOfMonth: number | null; // 1..31, kiểu 'monthly'
+    intervalDays: number | null; // >= 1, kiểu 'interval'
+    anchorDate: string | null; // 'YYYY-MM-DD', mốc đếm kiểu 'interval'
+    cron: string | null; // biểu thức 5 trường (giờ VN), kiểu 'cron'
+    intervalSeconds: number | null; // khoảng giây, kiểu 'every'
     enabled: boolean;
     lastRunDate: string | null; // 'YYYY-MM-DD'
+    lastRunSlot: string | null; // nhịp 5 phút gần nhất kiểu 'cron' đã chạy
     lastRunAt: string | null; // ISO, xem ghi chú ở CountdownEvent
     lastRunStatus: string | null; // 'ok' | 'error' | null
     lastRunDetail: string | null;
@@ -193,9 +208,17 @@ export interface Schedule {
     updatedAt: string | null;
 }
 
+// Chỉ gửi field hợp với `kind`; backend null hoá phần còn lại.
 export type ScheduleInput = {
     actionId: string;
-    timeOfDay: string;
+    kind: ScheduleKind;
+    timeOfDay?: string;
+    daysOfWeek?: number[];
+    dayOfMonth?: number;
+    intervalDays?: number;
+    anchorDate?: string;
+    cron?: string;
+    intervalSeconds?: number;
     payload: Record<string, unknown>;
     enabled: boolean;
 };

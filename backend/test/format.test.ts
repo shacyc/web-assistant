@@ -81,3 +81,83 @@ describe('formatCountdownMessage', () => {
         expect(unescapedDot).toBe(false);
     });
 });
+
+describe('formatCountdownMessage với mẫu tuỳ chỉnh (header / body / footer)', () => {
+    // row() mặc định: 2026-09-01 → 2026-10-01 (30 ngày). today 2026-09-19 → còn 12 ngày.
+    const BODY = '{eventName}: còn {remainDays} ngày ({remainWeeks} tuần, {remainDaysPercent}%) {progress} [{startDate}→{endDate}]';
+
+    it('body thay mọi tham số bằng giá trị của event', () => {
+        const msg = formatCountdownMessage([row({ event: 'Ra mắt' })], '2026-09-19', { body: BODY })!;
+        expect(msg).toContain('Ra mắt: còn 12 ngày');
+        expect(msg).toContain('[01/09/2026→01/10/2026]'); // start/end của event, không phải hôm nay
+        expect(msg).toContain('40%'); // 12/30
+    });
+
+    it('tham số tổng/đã qua của chặng: totalDays, totalWeeks, passedDays, passedWeeks, dailyPercent', () => {
+        // row() mặc định: chặng 30 ngày, hôm nay đã qua 18.
+        const msg = formatCountdownMessage([row()], '2026-09-19', {
+            body: 'T{totalDays}/{totalWeeks} · Q{passedDays}/{passedWeeks} · ngày {dailyPercent}%',
+        })!;
+        // 30/7 = 4.29 · 18/7 = 2.57 · 100/30 = 3.33 — dấu chấm đều đã escape.
+        expect(msg).toBe('T30/4\\.29 · Q18/2\\.57 · ngày 3\\.33%');
+    });
+
+    it('có mẫu tuỳ chỉnh → KHÔNG còn dòng "⏳ Countdown" mặc định', () => {
+        const msg = formatCountdownMessage([row()], '2026-09-19', { body: '{eventName}' })!;
+        expect(msg).not.toContain('⏳');
+    });
+
+    it('escape giá trị thay vào — số tuần có dấu chấm, không thì Telegram 400', () => {
+        // 12/7 = 1.71 → dấu chấm phải được escape. Bỏ escapeMd trong fillTemplate là dòng này đỏ.
+        const msg = formatCountdownMessage([row()], '2026-09-19', { body: '{remainWeeks} tuần' })!;
+        expect(msg).toContain('1\\.71 tuần');
+        expect(msg).not.toMatch(/1\.71/); // dấu chấm trần (chưa escape) là đỏ
+    });
+
+    it('escape tên sự kiện chứa ký tự Markdown nhưng KHÔNG escape chữ literal của mẫu', () => {
+        const msg = formatCountdownMessage([row({ event: 'Deadline #1 (gấp!)' })], '2026-09-19', { body: '*{eventName}*' })!;
+        expect(msg).toContain('*Deadline \\#1 \\(gấp\\!\\)*');
+    });
+
+    it('tham số lạ giữ nguyên {tên} thay vì làm hỏng cả tin nhắn', () => {
+        const msg = formatCountdownMessage([row()], '2026-09-19', { body: 'còn {remainDays} — {khongCoThamSoNay}' })!;
+        expect(msg).toContain('còn 12 — {khongCoThamSoNay}');
+    });
+
+    it('header ghép một lần ở đầu, footer một lần ở cuối; {today} và {count} được thay', () => {
+        const msg = formatCountdownMessage([row({ event: 'A' }), row({ event: 'B' })], '2026-09-19', {
+            header: 'CÓ {count} sự kiện — {today}',
+            body: '{eventName} còn {remainDays}',
+            footer: '— hết —',
+        })!;
+        const lines = msg.split('\n\n');
+        expect(lines[0]).toBe('CÓ 2 sự kiện — 19/09/2026');
+        expect(lines[lines.length - 1]).toBe('— hết —');
+        expect(msg).toContain('A còn 12');
+        expect(msg).toContain('B còn 12');
+    });
+
+    it('không set header/footer → KHÔNG ghép mảnh đó vào tin nhắn', () => {
+        const msg = formatCountdownMessage([row({ event: 'A' })], '2026-09-19', { body: '{eventName}' })!;
+        expect(msg).toBe('A');
+    });
+
+    it('chỉ set header (body rỗng) → block mỗi sự kiện vẫn dùng định dạng mặc định', () => {
+        const msg = formatCountdownMessage([row({ event: 'A' })], '2026-09-19', { header: 'TIÊU ĐỀ' })!;
+        expect(msg.startsWith('TIÊU ĐỀ\n\n')).toBe(true);
+        expect(msg).toContain('*A*'); // block mặc định
+        expect(msg).toContain('Còn 12 ngày');
+        expect(msg).not.toContain('⏳');
+    });
+
+    it('không mảnh nào được set → giữ nguyên định dạng mặc định (kèm "⏳")', () => {
+        const def = formatCountdownMessage([row()], '2026-09-19')!;
+        expect(def).toContain('⏳ *Countdown*');
+        expect(formatCountdownMessage([row()], '2026-09-19', {})).toBe(def);
+        expect(formatCountdownMessage([row()], '2026-09-19', { header: '', body: '  ', footer: '\n' })).toBe(def);
+    });
+
+    it('không có event active → null kể cả khi có mẫu', () => {
+        expect(formatCountdownMessage([], '2026-09-19', { header: 'x', body: BODY, footer: 'y' })).toBeNull();
+    });
+});

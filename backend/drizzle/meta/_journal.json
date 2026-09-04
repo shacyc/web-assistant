@@ -22,6 +22,34 @@
       "when": 1788429501037,
       "tag": "0002_schedules",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788487556806,
+      "tag": "0003_schedule_recurrence",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788488643555,
+      "tag": "0004_schedule_every",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788491564102,
+      "tag": "0005_countdown_template",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1788492462722,
+      "tag": "0006_countdown_header_footer",
+      "breakpoints": true
     }
   ]
 }

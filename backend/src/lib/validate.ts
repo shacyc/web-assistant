@@ -138,6 +138,16 @@ export class Body {
         return v;
     }
 
+    /** Số nguyên bắt buộc trong khoảng [min, max]. Không ép kiểu: '5' bị từ chối. */
+    requiredInt(name: string, min: number, max: number): number {
+        const v = this.raw[name];
+        if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) {
+            this.fail(name, `phải là số nguyên từ ${min} đến ${max}`);
+            return min;
+        }
+        return v;
+    }
+
     /** Giờ trong ngày 'HH:MM' 24h, bắt buộc. */
     requiredTime(name: string): string {
         const v = this.raw[name];

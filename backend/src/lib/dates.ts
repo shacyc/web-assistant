@@ -30,6 +30,77 @@ export function today(timeZone: string, now: Date = new Date()): string {
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+function ymd(value: string): [number, number, number] {
+    const [y, m, d] = value.split('-').map(Number);
+    return [y, m, d];
+}
+
+/** Thứ trong tuần theo ISO: 1 = Thứ Hai … 7 = Chủ Nhật. Dùng cho lịch "hằng tuần". */
+export function weekdayISO(value: string): number {
+    const [y, m, d] = ymd(value);
+    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = Chủ Nhật
+    return dow === 0 ? 7 : dow;
+}
+
+/** Ngày trong tháng của chuỗi 'YYYY-MM-DD', 1..31. */
+export function dayOfMonth(value: string): number {
+    return ymd(value)[2];
+}
+
+/** Số ngày của tháng chứa `value` (28..31). Ngày 0 của tháng sau = ngày cuối tháng này. */
+export function daysInMonth(value: string): number {
+    const [y, m] = ymd(value);
+    return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+export interface ZonedParts {
+    minute: number; // 0..59
+    hour: number; // 0..23
+    dom: number; // 1..31
+    month: number; // 1..12
+    dow: number; // 0..6, 0 = Chủ Nhật (theo quy ước cron)
+}
+
+/**
+ * Giờ/phút/ngày/tháng/thứ của `now` ở múi giờ đã cho — cho matcher cron. Cùng thủ thuật
+ * `Intl` với `today()` để không kéo theo thư viện timezone; `dow` tính lại từ y-m-d qua
+ * `Date.UTC` cho chắc, thay vì parse tên thứ theo locale.
+ */
+export function zonedParts(timeZone: string, now: Date = new Date()): ZonedParts {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+    }).formatToParts(now);
+    const g = (t: string) => Number(parts.find((x) => x.type === t)?.value);
+    const y = g('year');
+    const mo = g('month');
+    const d = g('day');
+    return {
+        minute: g('minute'),
+        hour: g('hour'),
+        dom: d,
+        month: mo,
+        dow: new Date(Date.UTC(y, mo - 1, d)).getUTCDay(),
+    };
+}
+
+/**
+ * Khoá "nhịp 5 phút" theo UTC: 'YYYY-MM-DDTHH:MM'. Chốt chống chạy trùng cho lịch `cron`
+ * (kiểu này chạy nhiều lần/ngày nên không dùng `last_run_date` được). Làm tròn xuống mốc
+ * 5 phút để hai lần cron chồng nhau rơi vào cùng một khoá.
+ */
+export function slotKeyUTC(now: Date = new Date()): string {
+    const t = new Date(now);
+    t.setUTCSeconds(0, 0);
+    t.setUTCMinutes(t.getUTCMinutes() - (t.getUTCMinutes() % 5));
+    return t.toISOString().slice(0, 16);
+}
+
 /**
  * 'HH:MM' (24h) của *bây giờ* ở múi giờ đã cho. Dùng cho lịch chạy: so với
  * `schedules.time_of_day` bằng phép so chuỗi.

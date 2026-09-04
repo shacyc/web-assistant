@@ -1,0 +1,1 @@
+ALTER TABLE `countdown_config` ADD `template` text;

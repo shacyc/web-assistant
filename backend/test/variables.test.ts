@@ -135,11 +135,9 @@ describe('kho variables', () => {
 });
 
 describe('countdown-config', () => {
-    it('mặc định (chưa có dòng) → cả hai key là null', async () => {
-        const cfg = (await (await req('/api/admin/countdown-config', { cookie })).json()) as {
-            chatIdKey: string | null; topicIdKey: string | null;
-        };
-        expect(cfg).toEqual({ chatIdKey: null, topicIdKey: null });
+    it('mặc định (chưa có dòng) → mọi field là null', async () => {
+        const cfg = (await (await req('/api/admin/countdown-config', { cookie })).json()) as Record<string, unknown>;
+        expect(cfg).toEqual({ chatIdKey: null, topicIdKey: null, header: null, template: null, footer: null });
     });
 
     it('PUT đặt mapping, GET đọc lại đúng; PUT lần hai ghi đè', async () => {
@@ -149,13 +147,44 @@ describe('countdown-config', () => {
             body: JSON.stringify({ chatIdKey: 'secretary telegram chat id', topicIdKey: 'secretary daily topic id' }),
         });
         let cfg = (await (await req('/api/admin/countdown-config', { cookie })).json()) as Record<string, unknown>;
-        expect(cfg).toEqual({ chatIdKey: 'secretary telegram chat id', topicIdKey: 'secretary daily topic id' });
+        expect(cfg).toEqual({ chatIdKey: 'secretary telegram chat id', topicIdKey: 'secretary daily topic id', header: null, template: null, footer: null });
 
         await req('/api/admin/countdown-config', {
             method: 'PUT', cookie,
             body: JSON.stringify({ chatIdKey: 'secretary telegram chat id', topicIdKey: null }),
         });
         cfg = (await (await req('/api/admin/countdown-config', { cookie })).json()) as Record<string, unknown>;
-        expect(cfg).toEqual({ chatIdKey: 'secretary telegram chat id', topicIdKey: null });
+        expect(cfg).toEqual({ chatIdKey: 'secretary telegram chat id', topicIdKey: null, header: null, template: null, footer: null });
     });
+
+    it('header/template/footer: PUT lưu, GET đọc lại; vắng mặt ở PUT sau = xoá về null', async () => {
+        const parts = { header: 'CÓ {count} sự kiện', template: '*{eventName}* còn {remainDays} ngày', footer: '— hết —' };
+        await req('/api/admin/countdown-config', {
+            method: 'PUT', cookie,
+            body: JSON.stringify({ chatIdKey: 'k', topicIdKey: null, ...parts }),
+        });
+        let cfg = (await (await req('/api/admin/countdown-config', { cookie })).json()) as Record<string, unknown>;
+        expect(cfg).toMatchObject(parts);
+
+        // Bảng một dòng, không phải PATCH: PUT không kèm ba mảnh = bỏ chọn hết.
+        await req('/api/admin/countdown-config', {
+            method: 'PUT', cookie,
+            body: JSON.stringify({ chatIdKey: 'k', topicIdKey: null }),
+        });
+        cfg = (await (await req('/api/admin/countdown-config', { cookie })).json()) as Record<string, unknown>;
+        expect(cfg.header).toBeNull();
+        expect(cfg.template).toBeNull();
+        expect(cfg.footer).toBeNull();
+    });
+
+    for (const field of ['header', 'template', 'footer'] as const) {
+        it(`${field} dài quá 4096 ký tự → 400 field "${field}"`, async () => {
+            const res = await req('/api/admin/countdown-config', {
+                method: 'PUT', cookie,
+                body: JSON.stringify({ chatIdKey: 'k', [field]: 'x'.repeat(4097) }),
+            });
+            expect(res.status).toBe(400);
+            expect(((await res.json()) as { field: string }).field).toBe(field);
+        });
+    }
 });

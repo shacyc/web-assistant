@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Settings2 } from 'lucide-react';
 import { listCountdowns, deleteCountdown, ApiError, type CountdownEvent } from '@/lib/apiClient';
 import { HStack, VStack } from '@astryxdesign/core/Stack';
 import { Heading, Text } from '@astryxdesign/core/Text';
@@ -14,6 +14,7 @@ import { PageBody } from '@/components/layout/PageBody';
 import { FeedbackError } from '@/components/Feedback';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { CountdownFormDialog } from './CountdownFormDialog';
+import { CountdownConfigDialog } from './CountdownConfigDialog';
 
 /** Cùng cách tính "hôm nay" với backend, để admin nhìn thấy đúng thứ bot sẽ gửi. */
 const todayVN = () =>
@@ -46,6 +47,8 @@ export function CountdownListPage() {
     // dialogOpen tách khỏi `editing` để lúc đóng vẫn giữ nội dung cũ (không nhấp nháy).
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editing, setEditing] = useState<CountdownEvent | null>(null);
+    // Dialog cấu hình gửi (chat/topic key + mẫu tin nhắn) — không đụng danh sách sự kiện.
+    const [configOpen, setConfigOpen] = useState(false);
     // Dòng đang chờ xác nhận xoá (null = không mở dialog xoá).
     const [pendingDelete, setPendingDelete] = useState<CountdownEvent | null>(null);
     const [deleting, setDeleting] = useState(false);
@@ -168,13 +171,22 @@ export function CountdownListPage() {
                         Hôm nay: {today}
                     </Text>
                 </VStack>
-                <Button
-                    label="Thêm sự kiện"
-                    onClick={openCreate}
-                    variant="primary"
-                    size="sm"
-                    icon={<Icon icon={Plus} size="sm" />}
-                />
+                <HStack gap={2} vAlign="center">
+                    <Button
+                        label="Cấu hình gửi"
+                        onClick={() => setConfigOpen(true)}
+                        variant="secondary"
+                        size="sm"
+                        icon={<Icon icon={Settings2} size="sm" />}
+                    />
+                    <Button
+                        label="Thêm sự kiện"
+                        onClick={openCreate}
+                        variant="primary"
+                        size="sm"
+                        icon={<Icon icon={Plus} size="sm" />}
+                    />
+                </HStack>
             </HStack>
 
             {error && <FeedbackError>{error}</FeedbackError>}
@@ -205,6 +217,8 @@ export function CountdownListPage() {
                 onOpenChange={setDialogOpen}
                 onSaved={reload}
             />
+
+            <CountdownConfigDialog isOpen={configOpen} onOpenChange={setConfigOpen} />
 
             <ConfirmDialog
                 isOpen={pendingDelete !== null}

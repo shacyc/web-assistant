@@ -1,6 +1,6 @@
 import { and, eq, lte, gte, asc } from 'drizzle-orm';
 import { countdownEvents, countdownConfig, variables } from '../db/schema';
-import { formatCountdownMessage } from '../telegram/format';
+import { formatCountdownMessage, type CountdownMessageParts } from '../telegram/format';
 import { sendTelegram } from '../telegram/send';
 import type { Db } from '../types';
 import type { BotAction } from './types';
@@ -11,10 +11,22 @@ import type { BotAction } from './types';
  * action phải tự kiểm cấu hình lúc chạy và báo lỗi cụ thể — thiếu bước này thì tin nhắn
  * âm thầm rơi vào "General" hoặc 400.
  */
-async function resolveTarget(db: Db): Promise<{ chatId: string; topicId?: string } | { error: string }> {
+type Target = { chatId: string; topicId?: string } | { error: string };
+
+/**
+ * Trả về cả `parts` (ba mảnh mẫu admin tự soạn) lẫn `target`. Tách `parts` ra ngoài
+ * nhánh lỗi: mẫu và đích gửi độc lập nhau, và chỗ gọi cần `parts` để dựng nội dung
+ * TRƯỚC khi quyết định "không có event nào → không gửi" hay "chưa cấu hình đích".
+ */
+async function resolveTarget(db: Db): Promise<{ parts: CountdownMessageParts; target: Target }> {
     const [cfg] = await db.select().from(countdownConfig).where(eq(countdownConfig.id, 1)).limit(1);
+    const parts: CountdownMessageParts = {
+        header: cfg?.header ?? null,
+        body: cfg?.template ?? null,
+        footer: cfg?.footer ?? null,
+    };
     if (!cfg?.chatIdKey) {
-        return { error: 'Chưa chọn key chứa Telegram chat id — vào màn Cấu hình để thiết lập.' };
+        return { parts, target: { error: 'Chưa chọn key chứa Telegram chat id — vào màn Cấu hình để thiết lập.' } };
     }
 
     const rows = await db.select().from(variables);
@@ -22,13 +34,13 @@ async function resolveTarget(db: Db): Promise<{ chatId: string; topicId?: string
 
     const chatId = byKey.get(cfg.chatIdKey)?.trim();
     if (!chatId) {
-        return { error: `Key "${cfg.chatIdKey}" chưa có giá trị (màn Variables).` };
+        return { parts, target: { error: `Key "${cfg.chatIdKey}" chưa có giá trị (màn Variables).` } };
     }
 
     // topicIdKey là tuỳ chọn. Có trỏ key nhưng key rỗng/không tồn tại → gửi vào "General"
     // thay vì chặn: nhóm không bật Topics là trường hợp hợp lệ.
     const topicId = cfg.topicIdKey ? byKey.get(cfg.topicIdKey)?.trim() || undefined : undefined;
-    return { chatId, topicId };
+    return { parts, target: { chatId, topicId } };
 }
 
 export const countdownNotify: BotAction = {
@@ -70,7 +82,10 @@ export const countdownNotify: BotAction = {
             )
             .orderBy(asc(countdownEvents.endDate));
 
-        const message = formatCountdownMessage(rows, ctx.today);
+        // Đọc mẫu + đích gửi một lượt. Cần `parts` ngay để dựng nội dung đúng định dạng
+        // admin chọn; `target` để lát nữa kiểm cấu hình.
+        const { parts, target } = await resolveTarget(ctx.db);
+        const message = formatCountdownMessage(rows, ctx.today, parts);
 
         // Ngày trống thì im lặng. Bot ấn nút mỗi ngày không nên đẻ ra tin nhắn rác.
         if (!message) {
@@ -79,7 +94,6 @@ export const countdownNotify: BotAction = {
 
         // Kiểm đích gửi TRƯỚC cả dryRun: "chạy thử" là để xem sẽ gửi gì VÀ gửi đi đâu,
         // nên cấu hình hỏng phải lộ ra ở đây chứ không đợi tới lần gửi thật.
-        const target = await resolveTarget(ctx.db);
         if ('error' in target) {
             return { ok: false, summary: target.error, data: { sent: false, reason: 'not_configured', error: target.error } };
         }

@@ -123,26 +123,48 @@ export async function seedVariable(key: string, value: string) {
  * dựng một cấu hình chạy được để test countdown.notify không phải lặp lại 4 dòng seed.
  */
 export async function seedCountdownConfig(
-    over: { chatIdKey?: string; chatId?: string; topicIdKey?: string | null; topicId?: string } = {},
+    over: {
+        chatIdKey?: string;
+        chatId?: string;
+        topicIdKey?: string | null;
+        topicId?: string;
+        header?: string | null;
+        template?: string | null;
+        footer?: string | null;
+    } = {},
 ) {
     const chatIdKey = over.chatIdKey ?? 'secretary telegram chat id';
     const topicIdKey = over.topicIdKey === undefined ? 'secretary daily topic id' : over.topicIdKey;
+    const header = over.header ?? null;
+    const template = over.template ?? null;
+    const footer = over.footer ?? null;
     if (over.chatId !== undefined) await seedVariable(chatIdKey, over.chatId);
     if (topicIdKey && over.topicId !== undefined) await seedVariable(topicIdKey, over.topicId);
     await env.assistant_db
-        .prepare('INSERT INTO countdown_config (id, chat_id_key, topic_id_key) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET chat_id_key = excluded.chat_id_key, topic_id_key = excluded.topic_id_key')
-        .bind(chatIdKey, topicIdKey)
+        .prepare(
+            'INSERT INTO countdown_config (id, chat_id_key, topic_id_key, header, template, footer) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET chat_id_key = excluded.chat_id_key, topic_id_key = excluded.topic_id_key, header = excluded.header, template = excluded.template, footer = excluded.footer',
+        )
+        .bind(chatIdKey, topicIdKey, header, template, footer)
         .run();
-    return { chatIdKey, topicIdKey };
+    return { chatIdKey, topicIdKey, header, template, footer };
 }
 
 export interface ScheduleOverrides {
     id?: string;
     actionId?: string;
     payload?: string;
+    kind?: string;
     timeOfDay?: string;
+    daysOfWeek?: string | null;
+    dayOfMonth?: number | null;
+    intervalDays?: number | null;
+    anchorDate?: string | null;
+    cron?: string | null;
+    intervalSeconds?: number | null;
     enabled?: number;
     lastRunDate?: string | null;
+    lastRunSlot?: string | null;
+    lastRunAt?: Date | null;
 }
 
 export async function seedSchedule(over: ScheduleOverrides = {}) {
@@ -150,13 +172,41 @@ export async function seedSchedule(over: ScheduleOverrides = {}) {
         id: over.id ?? crypto.randomUUID(),
         actionId: over.actionId ?? 'countdown.notify',
         payload: over.payload ?? '{}',
+        kind: over.kind ?? 'daily',
         timeOfDay: over.timeOfDay ?? '00:00',
+        daysOfWeek: over.daysOfWeek ?? null,
+        dayOfMonth: over.dayOfMonth ?? null,
+        intervalDays: over.intervalDays ?? null,
+        anchorDate: over.anchorDate ?? null,
+        cron: over.cron ?? null,
+        intervalSeconds: over.intervalSeconds ?? null,
         enabled: over.enabled ?? 1,
         lastRunDate: over.lastRunDate ?? null,
+        lastRunSlot: over.lastRunSlot ?? null,
+        // Cột mode:'timestamp' của drizzle = giây kể từ epoch.
+        lastRunAt: over.lastRunAt ? Math.floor(over.lastRunAt.getTime() / 1000) : null,
     };
     await env.assistant_db
-        .prepare('INSERT INTO schedules (id, action_id, payload, time_of_day, enabled, last_run_date) VALUES (?, ?, ?, ?, ?, ?)')
-        .bind(row.id, row.actionId, row.payload, row.timeOfDay, row.enabled, row.lastRunDate)
+        .prepare(
+            'INSERT INTO schedules (id, action_id, payload, kind, time_of_day, days_of_week, day_of_month, interval_days, anchor_date, cron, interval_seconds, enabled, last_run_date, last_run_slot, last_run_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        .bind(
+            row.id,
+            row.actionId,
+            row.payload,
+            row.kind,
+            row.timeOfDay,
+            row.daysOfWeek,
+            row.dayOfMonth,
+            row.intervalDays,
+            row.anchorDate,
+            row.cron,
+            row.intervalSeconds,
+            row.enabled,
+            row.lastRunDate,
+            row.lastRunSlot,
+            row.lastRunAt,
+        )
         .run();
     return row;
 }

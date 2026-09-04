@@ -126,6 +126,28 @@ describe('countdown.notify', () => {
         expect(tg.calls[0].message_thread_id).toBeUndefined();
     });
 
+    it('header / body / footer tuỳ chỉnh trong countdown_config được dùng để dựng nội dung', async () => {
+        await seedCountdownConfig({
+            chatId: CHAT_ID,
+            topicId: TOPIC_ID,
+            header: 'CÓ {count} sự kiện đang chạy',
+            template: 'SỰ KIỆN {eventName} — còn {remainDays} ngày',
+            footer: 'Nguồn: bot',
+        });
+        await seedEvent({ event: 'Khai trương', startDate: shift(-3), endDate: shift(7) });
+
+        const body = (await (await run()).json()) as { data: { sent: boolean; message: string } };
+        expect(body.data.sent).toBe(true);
+        expect(tg.calls).toHaveLength(1);
+        const text = tg.calls[0].text;
+        expect(text).toContain('1 sự kiện đang chạy');
+        expect(text).toContain('SỰ KIỆN Khai trương — còn 7 ngày');
+        expect(text).toContain('Nguồn: bot');
+        // Có mẫu tuỳ chỉnh → không còn dòng mặc định.
+        expect(text).not.toContain('Mỗi ngày trôi qua');
+        expect(text).not.toContain('⏳');
+    });
+
     it('Telegram trả lỗi → 502, ok:false, giữ nguyên câu giải thích', async () => {
         await seedCountdownConfig({ chatId: CHAT_ID, topicId: TOPIC_ID });
         tg.failNext(400, { ok: false, description: "can't parse entities" });

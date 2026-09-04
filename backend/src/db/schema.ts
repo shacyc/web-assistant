@@ -42,6 +42,13 @@ export const countdownConfig = sqliteTable('countdown_config', {
     // nên bị chặn bởi ràng buộc, countdown tự kiểm lúc chạy.
     chatIdKey: text('chat_id_key'),
     topicIdKey: text('topic_id_key'),
+    // Ba mảnh mẫu tin nhắn admin tự soạn: `header` (một lần, đầu), `template` (mỗi sự
+    // kiện), `footer` (một lần, cuối). Null/rỗng = KHÔNG ghép mảnh đó. Cả ba cùng null =
+    // dùng định dạng mặc định trong `telegram/format.ts`. Chữ literal trong mẫu là markup
+    // admin tự chịu trách nhiệm escape; chỉ GIÁ TRỊ thay vào mới được auto-escape.
+    header: text('header'),
+    template: text('template'),
+    footer: text('footer'),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 
@@ -57,13 +64,30 @@ export const schedules = sqliteTable('schedules', {
     // JSON các field truyền vào action.run(). '{}' = không field nào. Với countdown.notify
     // đây là chỗ đặt {"dryRun": false}. Không parse được → coi như '{}'.
     payload: text('payload').notNull().default('{}'),
-    // 'HH:MM' 24h theo TIMEZONE. So sánh chuỗi '<=' đúng vì luôn zero-pad (giống start_date).
+
+    // Kiểu lặp. 'daily' | 'weekly' | 'monthly' | 'interval' đều "tối đa một lần/ngày" và
+    // chốt bằng last_run_date. 'cron' chạy nhiều lần/ngày, chốt bằng last_run_slot.
+    // 'every' chạy sau mỗi khoảng thời gian trôi qua, chốt bằng last_run_at.
+    kind: text('kind').notNull().default('daily'),
+    // 'HH:MM' 24h theo TIMEZONE. So sánh chuỗi '<=' đúng vì luôn zero-pad. Kiểu 'cron' và
+    // 'every' KHÔNG dùng cột này — lưu '00:00' làm chỗ giữ (cột NOT NULL).
     timeOfDay: text('time_of_day').notNull(),
+    daysOfWeek: text('days_of_week'), // CSV ISO '1,3,5' (1 = Thứ Hai), chỉ cho 'weekly'
+    dayOfMonth: integer('day_of_month'), // 1..31, chỉ cho 'monthly'; kẹp về ngày cuối tháng ngắn
+    intervalDays: integer('interval_days'), // >= 1, chỉ cho 'interval'
+    anchorDate: text('anchor_date'), // 'YYYY-MM-DD', mốc đếm cho 'interval'
+    cron: text('cron'), // biểu thức 5 trường (giờ VN), chỉ cho 'cron'
+    // Khoảng giây giữa hai lần chạy, chỉ cho 'every'. Độ phân giải thực tế là 300s (nhịp
+    // cron), khoảng nhỏ hơn coi như "mỗi nhịp".
+    intervalSeconds: integer('interval_seconds'),
+
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-    // 'YYYY-MM-DD' lần chạy gần nhất, thành công HAY lỗi. Đây là chốt "mỗi ngày một lần":
-    // handler bỏ qua dòng có last_run_date = hôm nay. Job lỗi KHÔNG tự thử lại trong ngày
-    // — đánh đổi lấy việc không bao giờ gửi trùng. null = chưa chạy bao giờ.
+    // 'YYYY-MM-DD' lần chạy gần nhất, thành công HAY lỗi. Chốt "mỗi ngày một lần" cho 4
+    // kiểu đầu: handler bỏ qua dòng có last_run_date = hôm nay. Job lỗi KHÔNG tự thử lại
+    // trong ngày — đánh đổi lấy việc không bao giờ gửi trùng. null = chưa chạy bao giờ.
     lastRunDate: text('last_run_date'),
+    // 'YYYY-MM-DDTHH:MM' (UTC, làm tròn 5 phút) — chốt chống trùng cho kiểu 'cron'.
+    lastRunSlot: text('last_run_slot'),
     lastRunAt: integer('last_run_at', { mode: 'timestamp' }),
     lastRunStatus: text('last_run_status'), // 'ok' | 'error' | null
     lastRunDetail: text('last_run_detail'), // tóm tắt kết quả gần nhất, cho màn Lịch đọc

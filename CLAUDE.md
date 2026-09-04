@@ -101,7 +101,10 @@ mới thì phải trả lời được nó tốn bao nhiêu CPU.
 một dòng kiểm tra) và đếm xem mấy test đỏ. Không đỏ = test không canh gì cả. Các lớp
 phòng thủ đã soi bằng cách này, mỗi lớp phá là có đỏ: `escapeMd` (3 đỏ) ·
 `secretEquals` (3 đỏ) · lọc `enabled` (1 đỏ) · nhánh `dryRun` (1 đỏ) · chốt
-`isDue`/`last_run_date` của lịch (1 đỏ) · `UPDATE` có điều kiện chống cron chạy đôi (1 đỏ).
+`isDueStructured`/`last_run_date` của lịch (1 đỏ) · `UPDATE` có điều kiện chống cron chạy
+đôi (1 đỏ) · chốt `last_run_slot` của kiểu cron (1 đỏ) · ngữ nghĩa "ngày HOẶC thứ" của
+cron (1 đỏ) · kẹp `day_of_month` về ngày cuối tháng (1 đỏ) · chốt khoảng của `isDueEvery`
+(1 đỏ) · `last_run_at` ghi mốc nhịp chứ không phải lúc chạy xong (1 đỏ).
 
 **Chặn request ra ngoài trong test bằng `mockTelegram()` trong `test/helpers.ts`**, không
 phải `fetchMock` của `cloudflare:test` — pool 0.22 đã bỏ export đó (cùng với
@@ -142,16 +145,30 @@ export const myAction: BotAction = {
 
 Cloudflare chỉ có **một** cron trigger (`wrangler.jsonc` → `triggers.crons`), bắn mỗi 5
 phút, **giờ UTC**. Handler `scheduled` trong `src/index.ts` không hardcode việc gì: nó
-đọc bảng `schedules` rồi chạy action nào tới giờ. Cùng tinh thần registry — cron là hạ
+đọc bảng `schedules` rồi chạy action nào tới lượt. Cùng tinh thần registry — cron là hạ
 tầng, "chạy gì lúc nào" là dữ liệu admin sửa qua `/admin/schedules`, **không deploy**.
 
-- `time_of_day` là `'HH:MM'` theo `TIMEZONE` (không phải UTC — chỉ biểu thức cron mới UTC).
-- **Mỗi ngày một lần**: handler bỏ qua dòng có `last_run_date` = hôm nay. Job lỗi **không
-  tự thử lại** trong ngày (admin thấy lỗi ở màn Lịch + Nhật ký) — đổi lấy việc không bao
-  giờ gửi trùng. Nhịp cron bị bỏ lỡ thì nhịp sau vẫn vớt lại được (điều kiện là
-  `time_of_day <= giờ hiện tại`, không phải cửa sổ hẹp quanh đúng phút).
-- Chốt chống chạy đôi khi hai lần cron chồng nhau: `UPDATE schedules SET last_run_date =
-  hôm nay WHERE ... AND last_run_date chưa = hôm nay`, rồi kiểm `meta.changes`.
+- `schedules.kind` chọn kiểu lặp. Bốn kiểu **tối đa một lần/ngày** — `daily` · `weekly`
+  (`days_of_week` CSV ISO, 1 = Thứ Hai) · `monthly` (`day_of_month`, kẹp về ngày cuối
+  tháng ngắn) · `interval` (`interval_days` + `anchor_date`) — dùng `time_of_day`
+  (`'HH:MM'` theo `TIMEZONE`) và chốt bằng `last_run_date`. Kiểu `cron` chạy **nhiều
+  lần/ngày**: biểu thức 5 trường (`lib/cron.ts`, viết tay, khớp theo giờ `TIMEZONE`),
+  chốt bằng `last_run_slot` (nhịp 5 phút, UTC). Kiểu `every` chạy sau **mỗi
+  `interval_seconds`** trôi qua, chốt bằng `last_run_at`. `time_of_day` cột NOT NULL nên
+  `cron`/`every` lưu `'00:00'` làm chỗ giữ.
+- Logic "có tới lượt không" nằm gọn trong `lib/schedule.ts` (`isDueStructured`,
+  `isDueCron`, `isDueEvery`, `matchesDay`) — thuần, test riêng, không cần dựng worker.
+- `last_run_at` LUÔN ghi = mốc nhịp (`event.scheduledTime`), KHÔNG phải lúc action chạy
+  xong — nếu không, khoảng của `every` trôi thêm vài giây mỗi vòng, lệch khỏi lưới 5 phút
+  và "mỗi 1 giờ" biến thành "mỗi 1 giờ 5 phút".
+- Job lỗi **không tự thử lại** trong ngày/nhịp (admin thấy lỗi ở màn Lịch + Nhật ký) —
+  đổi lấy việc không bao giờ gửi trùng. Nhịp cron bị bỏ lỡ thì nhịp sau vẫn vớt lại
+  được (điều kiện là `time_of_day <= giờ hiện tại`, không phải cửa sổ hẹp quanh đúng phút).
+- Biểu thức cron chỉ khớp được các mốc rơi vào nhịp 5 phút của trigger thật — `31 * * * *`
+  không bao giờ chạy. `every` với khoảng < 5 phút thành "mỗi nhịp". Màn Lịch ghi chú cả hai.
+- Chốt chống chạy đôi khi hai lần cron chồng nhau: `UPDATE schedules SET <cột chốt> =
+  <giá trị> WHERE ... AND <cột chốt> chưa = <giá trị>`, rồi kiểm `meta.changes`.
+- Handler dùng `event.scheduledTime` (mốc nhịp) làm "bây giờ", không phải `Date.now()`.
 - `POST /api/admin/schedules/:id/run` chạy job ngay để thử, **cố ý không đụng**
   `last_run_date` — lịch tự động vẫn chạy đúng giờ sau đó.
 - Cron và nút "Chạy ngay" đi qua `actions/run.ts` (`runActionById`) — ghi `execution_logs`

@@ -29,6 +29,36 @@ interface ScheduleRow extends Schedule {
     [key: string]: unknown;
 }
 
+const WD = ['', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+
+/** 5400 → "1 giờ 30 phút" */
+function fmtDuration(total: number): string {
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return [h && `${h} giờ`, m && `${m} phút`, s && `${s} giây`].filter(Boolean).join(' ') || '0 giây';
+}
+
+/** Một dòng tóm tắt kiểu lặp cho bảng — đọc là hiểu chạy khi nào. */
+function describeSchedule(r: Schedule): string {
+    switch (r.kind) {
+        case 'weekly': {
+            const days = (r.daysOfWeek ?? '').split(',').filter(Boolean).map((n) => WD[+n]).join(' ');
+            return `${days || '—'} · ${r.timeOfDay}`;
+        }
+        case 'monthly':
+            return `Ngày ${r.dayOfMonth} hằng tháng · ${r.timeOfDay}`;
+        case 'interval':
+            return `Mỗi ${r.intervalDays} ngày · ${r.timeOfDay}`;
+        case 'every':
+            return `Mỗi ${fmtDuration(r.intervalSeconds ?? 0)}`;
+        case 'cron':
+            return `cron: ${r.cron}`;
+        default:
+            return `Hằng ngày · ${r.timeOfDay}`;
+    }
+}
+
 export function SchedulesPage() {
     const [rows, setRows] = useState<Schedule[] | null>(null);
     const [actions, setActions] = useState<ActionMeta[]>([]);
@@ -110,36 +140,36 @@ export function SchedulesPage() {
 
     const columns: TableColumn<ScheduleRow>[] = [
         {
-            key: 'timeOfDay',
-            header: 'Giờ',
-            width: pixel(80),
-            renderCell: (row) => (
-                <Text type="body" weight="medium" hasTabularNumbers>
-                    {row.timeOfDay}
-                </Text>
-            ),
-        },
-        {
-            key: 'action',
-            header: 'Việc',
+            // Gộp "khi nào chạy" + "chạy cái gì" vào một cột co giãn: bảng chỉ rộng ~830px
+            // mà tách 5 cột cố định thì cột nào cũng chật. Hai dòng: lịch (đậm) + việc (mờ).
+            key: 'schedule',
+            header: 'Lịch',
             width: proportional(3),
             renderCell: (row) => (
                 <VStack gap={0}>
-                    <Text type="body">{labelOf(row.actionId)}</Text>
-                    <Text type="code" size="sm" color="secondary">
-                        {row.actionId}
-                        {row.payload !== '{}' && ` ${row.payload}`}
+                    <Text type="body" weight="medium" hasTabularNumbers>
+                        {describeSchedule(row)}
                     </Text>
+                    <HStack gap={2} vAlign="center" wrap="wrap">
+                        <Text type="supporting" color="secondary">
+                            {labelOf(row.actionId)}
+                        </Text>
+                        {row.payload !== '{}' && (
+                            <Text type="code" size="sm" color="secondary">
+                                {row.payload}
+                            </Text>
+                        )}
+                    </HStack>
                 </VStack>
             ),
         },
         {
             key: 'enabled',
             header: 'Bật',
-            width: pixel(70),
+            width: pixel(52),
             renderCell: (row) => (
                 <Switch
-                    label={`Bật lịch ${row.timeOfDay}`}
+                    label={`Bật lịch ${describeSchedule(row)}`}
                     isLabelHidden
                     value={row.enabled}
                     onChange={(checked) => toggleEnabled(row, checked)}
@@ -149,10 +179,10 @@ export function SchedulesPage() {
         {
             key: 'lastRun',
             header: 'Chạy gần nhất',
-            width: pixel(200),
+            width: pixel(150),
             renderCell: (row) =>
                 row.lastRunAt ? (
-                    <HStack gap={2} vAlign="center" wrap="wrap">
+                    <VStack gap={1}>
                         <Text type="supporting" color="secondary" hasTabularNumbers>
                             {new Date(row.lastRunAt).toLocaleString('vi-VN')}
                         </Text>
@@ -160,7 +190,7 @@ export function SchedulesPage() {
                             variant={row.lastRunStatus === 'ok' ? 'success' : 'error'}
                             label={row.lastRunStatus ?? '—'}
                         />
-                    </HStack>
+                    </VStack>
                 ) : (
                     <Text type="supporting" color="secondary">
                         chưa chạy
@@ -168,14 +198,18 @@ export function SchedulesPage() {
                 ),
         },
         {
+            // Nút chỉ-icon + tooltip: "Chạy ngay / Sửa / Xoá" dạng chữ chiếm ~220px và vẫn
+            // bị cắt. `label` giữ nguyên làm tên cho screen reader.
             key: 'actions',
             header: '',
-            width: pixel(220),
+            width: pixel(116),
             align: 'end',
             renderCell: (row) => (
                 <HStack gap={1} hAlign="end">
                     <Button
                         label="Chạy ngay"
+                        isIconOnly
+                        tooltip="Chạy ngay"
                         variant="ghost"
                         size="sm"
                         isLoading={runningId === row.id}
@@ -185,6 +219,8 @@ export function SchedulesPage() {
                     />
                     <Button
                         label="Sửa"
+                        isIconOnly
+                        tooltip="Sửa"
                         variant="ghost"
                         size="sm"
                         onClick={() => openEdit(row)}
@@ -192,6 +228,8 @@ export function SchedulesPage() {
                     />
                     <Button
                         label="Xoá"
+                        isIconOnly
+                        tooltip="Xoá"
                         variant="ghost"
                         size="sm"
                         onClick={() => setPendingDelete(row)}
@@ -204,22 +242,22 @@ export function SchedulesPage() {
 
     return (
         <PageBody>
-            <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
-                <VStack gap={0}>
+            <VStack gap={1}>
+                <HStack gap={3} vAlign="center" hAlign="between" wrap="wrap">
                     <Heading level={1}>Lịch chạy</Heading>
-                    <Text type="supporting" color="secondary">
-                        Cron bắn mỗi 5 phút và chạy job nào tới giờ (giờ VN), mỗi ngày một lần.
-                    </Text>
-                </VStack>
-                <Button
-                    label="Thêm lịch"
-                    onClick={openCreate}
-                    variant="primary"
-                    size="sm"
-                    isDisabled={actions.length === 0}
-                    icon={<Icon icon={Plus} size="sm" />}
-                />
-            </HStack>
+                    <Button
+                        label="Thêm lịch"
+                        onClick={openCreate}
+                        variant="primary"
+                        size="sm"
+                        isDisabled={actions.length === 0}
+                        icon={<Icon icon={Plus} size="sm" />}
+                    />
+                </HStack>
+                <Text type="supporting" color="secondary">
+                    Cron chạy mỗi 5 phút theo giờ VN, gọi job nào tới lượt.
+                </Text>
+            </VStack>
 
             {error && <FeedbackError>{error}</FeedbackError>}
             {notice && <FeedbackNotice>{notice}</FeedbackNotice>}
@@ -255,7 +293,7 @@ export function SchedulesPage() {
             <ConfirmDialog
                 isOpen={pendingDelete !== null}
                 title="Xoá lịch"
-                message={`Xoá lịch chạy "${pendingDelete ? labelOf(pendingDelete.actionId) : ''}" lúc ${pendingDelete?.timeOfDay}? Không khôi phục được.`}
+                message={`Xoá lịch chạy "${pendingDelete ? labelOf(pendingDelete.actionId) : ''}" (${pendingDelete ? describeSchedule(pendingDelete) : ''})? Không khôi phục được.`}
                 confirmLabel="Xoá"
                 tone="destructive"
                 isBusy={deleting}

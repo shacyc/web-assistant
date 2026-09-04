@@ -12,7 +12,8 @@ import { issue, secretEquals } from '../auth/session';
 import { requireAdmin } from '../auth/guards';
 import { getAction, listActions } from '../actions/registry';
 import { runActionById } from '../actions/run';
-import { parsePayload } from '../lib/schedule';
+import { parsePayload, SCHEDULE_KINDS } from '../lib/schedule';
+import { parseCron } from '../lib/cron';
 
 export const adminRoutes = new Hono<Env>();
 
@@ -298,8 +299,18 @@ adminRoutes.post('/variables/import', async (c) => {
 adminRoutes.get('/countdown-config', async (c) => {
     const db = drizzle(c.env.assistant_db, { schema });
     const [row] = await db.select().from(countdownConfig).where(eq(countdownConfig.id, 1)).limit(1);
-    return c.json({ chatIdKey: row?.chatIdKey ?? null, topicIdKey: row?.topicIdKey ?? null });
+    return c.json({
+        chatIdKey: row?.chatIdKey ?? null,
+        topicIdKey: row?.topicIdKey ?? null,
+        header: row?.header ?? null,
+        template: row?.template ?? null,
+        footer: row?.footer ?? null,
+    });
 });
+
+// Mỗi mảnh mẫu nằm gọn trong một tin Telegram (4096 ký tự) — chặn ở đây để một dòng
+// config không nuốt hết 10ms CPU lúc render.
+const TEMPLATE_MAX = 4096;
 
 adminRoutes.put('/countdown-config', async (c) => {
     let raw: unknown;
@@ -312,14 +323,20 @@ adminRoutes.put('/countdown-config', async (c) => {
     // Bảng một dòng, không có khái niệm "giữ nguyên field": vắng mặt hay null đều = bỏ chọn.
     const chatIdKey = f.optionalString('chatIdKey', KEY_MAX) ?? null;
     const topicIdKey = f.optionalString('topicIdKey', KEY_MAX) ?? null;
+    const header = f.optionalString('header', TEMPLATE_MAX) ?? null;
+    const template = f.optionalString('template', TEMPLATE_MAX) ?? null;
+    const footer = f.optionalString('footer', TEMPLATE_MAX) ?? null;
     if (f.error) return invalidBody(c, f.error);
 
     try {
         const db = drizzle(c.env.assistant_db, { schema });
         await db
             .insert(countdownConfig)
-            .values({ id: 1, chatIdKey, topicIdKey })
-            .onConflictDoUpdate({ target: countdownConfig.id, set: { chatIdKey, topicIdKey, updatedAt: new Date() } });
+            .values({ id: 1, chatIdKey, topicIdKey, header, template, footer })
+            .onConflictDoUpdate({
+                target: countdownConfig.id,
+                set: { chatIdKey, topicIdKey, header, template, footer, updatedAt: new Date() },
+            });
         return c.json({ ok: true });
     } catch (err) {
         return serverError(c, err, 'admin.countdownConfig.put');
@@ -331,6 +348,86 @@ adminRoutes.put('/countdown-config', async (c) => {
 // payload là JSON của các field truyền vào action. Trần để một dòng lịch không nuốt hết
 // 10ms CPU lúc handler `scheduled` parse nó mỗi 5 phút.
 const PAYLOAD_MAX = 2000;
+
+// Các cột "recurrence" của một dòng lịch. Chỉ những cột hợp với `kind` được điền, phần
+// còn lại là null — để handler `scheduled` không phải đoán và `isDue*` không nhập nhằng.
+interface Recurrence {
+    kind: string;
+    timeOfDay: string;
+    daysOfWeek: string | null;
+    dayOfMonth: number | null;
+    intervalDays: number | null;
+    anchorDate: string | null;
+    cron: string | null;
+    intervalSeconds: number | null;
+}
+
+// 60s tối thiểu (dưới nhịp cron thì vô nghĩa, nhưng cho phép + cảnh báo ở UI), 7 ngày tối đa.
+const EVERY_MIN_SEC = 60;
+const EVERY_MAX_SEC = 7 * 24 * 3600;
+
+/**
+ * Đọc + kiểm phần lịch lặp từ body, chuẩn hoá về `Recurrence`. Ghi lỗi vào `f` như mọi
+ * validator khác; caller chỉ kiểm `f.error` một lần.
+ *
+ * `time_of_day` là cột NOT NULL nên kiểu 'cron' (không dùng giờ) vẫn phải có giá trị —
+ * lưu '00:00' làm chỗ giữ, handler kiểu 'cron' không đọc cột này.
+ */
+function parseRecurrence(f: Body, raw: Record<string, unknown>): Recurrence {
+    const out: Recurrence = {
+        kind: 'daily',
+        timeOfDay: '00:00',
+        daysOfWeek: null,
+        dayOfMonth: null,
+        intervalDays: null,
+        anchorDate: null,
+        cron: null,
+        intervalSeconds: null,
+    };
+
+    // Vắng `kind` = 'daily' (hành vi cũ, và là mặc định hợp lý). Có thì phải hợp lệ.
+    const kind = raw.kind === undefined ? 'daily' : f.requiredString('kind', 20);
+    if (f.error) return out;
+    if (!SCHEDULE_KINDS.includes(kind as (typeof SCHEDULE_KINDS)[number])) {
+        f.reject('kind', `phải là một trong: ${SCHEDULE_KINDS.join(', ')}`);
+        return out;
+    }
+    out.kind = kind;
+
+    if (kind === 'cron') {
+        const expr = f.requiredString('cron', 120);
+        if (!f.error && !parseCron(expr)) {
+            f.reject('cron', 'biểu thức không hợp lệ — cần 5 trường: phút giờ ngày tháng thứ');
+        }
+        out.cron = expr;
+        return out;
+    }
+
+    if (kind === 'every') {
+        out.intervalSeconds = f.requiredInt('intervalSeconds', EVERY_MIN_SEC, EVERY_MAX_SEC);
+        return out;
+    }
+
+    // 4 kiểu còn lại đều cần giờ chạy.
+    out.timeOfDay = f.requiredTime('timeOfDay');
+
+    if (kind === 'weekly') {
+        const arr = Array.isArray(raw.daysOfWeek) ? (raw.daysOfWeek as unknown[]) : null;
+        if (!arr || arr.length === 0) {
+            f.reject('daysOfWeek', 'chọn ít nhất một thứ trong tuần');
+        } else if (!arr.every((n) => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 7)) {
+            f.reject('daysOfWeek', 'mỗi phần tử phải là số 1..7 (1 = Thứ Hai)');
+        } else {
+            out.daysOfWeek = [...new Set(arr as number[])].sort((a, b) => a - b).join(',');
+        }
+    } else if (kind === 'monthly') {
+        out.dayOfMonth = f.requiredInt('dayOfMonth', 1, 31);
+    } else if (kind === 'interval') {
+        out.intervalDays = f.requiredInt('intervalDays', 1, 365);
+        out.anchorDate = f.requiredDate('anchorDate');
+    }
+    return out;
+}
 
 adminRoutes.get('/schedules', async (c) => {
     const db = drizzle(c.env.assistant_db, { schema });
@@ -350,7 +447,7 @@ adminRoutes.post('/schedules', async (c) => {
 
     const f = new Body(raw);
     const actionId = f.requiredString('actionId', 100);
-    const timeOfDay = f.requiredTime('timeOfDay');
+    const rec = parseRecurrence(f, (raw ?? {}) as Record<string, unknown>);
     const payload = f.optionalJsonObjectString('payload', PAYLOAD_MAX);
     const enabled = f.optionalBoolean('enabled');
 
@@ -365,7 +462,7 @@ adminRoutes.post('/schedules', async (c) => {
         await db.insert(schedules).values({
             id,
             actionId,
-            timeOfDay,
+            ...rec,
             payload: payload ?? '{}',
             enabled: enabled ?? true,
         });
@@ -389,13 +486,20 @@ adminRoutes.patch('/schedules/:id', async (c) => {
     if (!existing) return fail(c, 404, 'NOT_FOUND', 'Không có lịch này');
 
     const f = new Body(raw);
+    const body = (raw ?? {}) as Record<string, unknown>;
     // `undefined` = không gửi = giữ nguyên (drizzle bỏ qua undefined trong .set()).
-    const hasActionId = raw !== null && typeof raw === 'object' && 'actionId' in raw;
+    const has = (k: string) => raw !== null && typeof raw === 'object' && k in (raw as object);
+
+    // Có `kind` = form sửa gửi lại toàn bộ lịch lặp → ghi đè cả cụm, null hoá cột không
+    // hợp kiểu mới (weekly → daily phải xoá days_of_week). Không có `kind` = sửa lẻ, chỉ
+    // cho vài field an toàn (toggle bật/tắt, đổi payload…).
+    const rec = has('kind') ? parseRecurrence(f, body) : null;
+
     const patch = {
-        actionId: hasActionId ? f.requiredString('actionId', 100) : undefined,
-        timeOfDay: f.optionalTime('timeOfDay'),
+        actionId: has('actionId') ? f.requiredString('actionId', 100) : undefined,
         payload: f.optionalJsonObjectString('payload', PAYLOAD_MAX),
         enabled: f.optionalBoolean('enabled'),
+        ...(rec ? rec : { timeOfDay: f.optionalTime('timeOfDay') }),
     };
     if (!f.error && patch.actionId !== undefined && !getAction(patch.actionId)) {
         f.reject('actionId', 'không có trong registry');
