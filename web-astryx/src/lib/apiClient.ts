@@ -226,11 +226,15 @@ export const deleteHealthCheck = (id: string) => request<{ ok: true }>('DELETE',
 export const runHealthChecks = () =>
     request<{ ok: boolean; summary: string }>('POST', '/admin/healthchecks/run');
 
+// Tần suất gửi Telegram: mọi lần kiểm / khi state đổi (2 chiều) / chỉ khi đổi sang sập.
+export type HealthCheckNotifyMode = 'always' | 'on_change' | 'on_down';
+
 export interface HealthCheckConfig {
     chatIdKey: string | null;
     topicIdKey: string | null;
     // Mẫu tin nhắn cho mỗi lần state đổi. Null/rỗng = mẫu mặc định.
     template: string | null;
+    notifyMode: HealthCheckNotifyMode;
 }
 
 export const getHealthCheckConfig = () => request<HealthCheckConfig>('GET', '/admin/healthcheck-config');
@@ -244,7 +248,7 @@ export const testHealthCheckConfig = () =>
 
 /* ---------- Lịch chạy tự động ---------- */
 
-export type ScheduleKind = 'daily' | 'weekly' | 'monthly' | 'interval' | 'cron' | 'every';
+export type ScheduleKind = 'daily' | 'weekly' | 'monthly' | 'interval' | 'cron' | 'every' | 'tick';
 
 export interface Schedule {
     id: string;

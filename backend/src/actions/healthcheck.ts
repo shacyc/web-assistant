@@ -3,7 +3,7 @@ import { healthcheckTargets, healthcheckConfig, variables } from '../db/schema';
 import { formatHealthcheckMessage, type StateChange } from '../telegram/healthcheckFormat';
 import { sendTelegram } from '../telegram/send';
 import { formatVNDateTime } from '../lib/dates';
-import { TIMEOUT_MS, BODY_MAX, evaluateTarget, probeDetail, type Probe } from '../lib/healthcheck';
+import { TIMEOUT_MS, BODY_MAX, evaluateTarget, probeDetail, shouldNotify, type Probe } from '../lib/healthcheck';
 import type { Db } from '../types';
 import type { BotAction } from './types';
 
@@ -12,21 +12,28 @@ type Target = { chatId: string; topicId?: string } | { error: string };
 /** Đọc `healthcheck_config` + `variables` → đích gửi. Bản sao `resolveTarget` của
  *  `countdownNotify.ts`: mẫu và đích gửi độc lập nhau nên trả cả hai, chỗ gọi cần
  *  `template` để dựng nội dung trước khi quyết định có gửi hay không. */
-async function resolveHealthTarget(db: Db): Promise<{ template: string | null; target: Target }> {
+async function resolveHealthTarget(
+    db: Db,
+): Promise<{ template: string | null; notifyMode: string; target: Target }> {
     const [cfg] = await db.select().from(healthcheckConfig).where(eq(healthcheckConfig.id, 1)).limit(1);
     const template = cfg?.template ?? null;
+    const notifyMode = cfg?.notifyMode ?? 'on_change';
     if (!cfg?.chatIdKey) {
-        return { template, target: { error: 'Chưa chọn key chứa Telegram chat id — vào màn Cấu hình để thiết lập.' } };
+        return {
+            template,
+            notifyMode,
+            target: { error: 'Chưa chọn key chứa Telegram chat id — vào màn Cấu hình để thiết lập.' },
+        };
     }
     const rows = await db.select().from(variables);
     const byKey = new Map(rows.map((r) => [r.key, r.value]));
     const chatId = byKey.get(cfg.chatIdKey)?.trim();
     if (!chatId) {
-        return { template, target: { error: `Key "${cfg.chatIdKey}" chưa có giá trị (màn Variables).` } };
+        return { template, notifyMode, target: { error: `Key "${cfg.chatIdKey}" chưa có giá trị (màn Variables).` } };
     }
     // topicIdKey tuỳ chọn: trỏ key rỗng/không tồn tại → gửi vào "General" thay vì chặn.
     const topicId = cfg.topicIdKey ? byKey.get(cfg.topicIdKey)?.trim() || undefined : undefined;
-    return { template, target: { chatId, topicId } };
+    return { template, notifyMode, target: { chatId, topicId } };
 }
 
 /**
@@ -100,6 +107,10 @@ export const healthcheckRun: BotAction = {
             return { ok: true, summary: 'Không có site nào đang bật.', data: { checked: 0, changes: 0, sent: 0 } };
         }
 
+        // Đọc cấu hình đích + tần suất TRƯỚC khi tính `notify`: `notify_mode` quyết định
+        // predicate bên dưới.
+        const { template, notifyMode, target } = await resolveHealthTarget(ctx.db);
+
         // Song song: tổng wall-time ≈ fetch chậm nhất, không phải tổng các fetch.
         const probes = await Promise.all(targets.map((t) => probe(t)));
 
@@ -113,19 +124,19 @@ export const healthcheckRun: BotAction = {
                 state,
                 scriptError,
                 prev,
-                // null tính là "đổi" — nhưng chỉ `notify` (so với 'up' mặc định) mới gửi.
+                // null tính là "đổi" (để chốt `last_state`), nhưng có gửi hay không thì
+                // `shouldNotify` quyết định theo `notify_mode`.
                 rawChanged: state !== t.lastState,
-                notify: state !== prev,
+                notify: shouldNotify(notifyMode, prev, state),
             };
         });
 
         const changes = evald.filter((e) => e.notify);
-        const { template, target } = await resolveHealthTarget(ctx.db);
 
         if (dryRun) {
             const lines = evald.map(
                 (e) =>
-                    `${e.t.label}: ${e.prev} → ${e.state}${e.notify ? ' (sẽ báo)' : ''} · ${probeDetail(e.p)}` +
+                    `${e.t.label}: ${e.prev} → ${e.state}${e.notify ? ' (sẽ gửi)' : ''} · ${probeDetail(e.p)}` +
                     (e.scriptError ? ` · ${e.scriptError}` : ''),
             );
             const warn =
@@ -133,9 +144,16 @@ export const healthcheckRun: BotAction = {
             return {
                 ok: true,
                 summary:
-                    `[CHẠY THỬ] Đã kiểm ${targets.length} site, ${changes.length} đổi trạng thái. Không gửi, không lưu.` +
+                    `[CHẠY THỬ] Đã kiểm ${targets.length} site, sẽ gửi ${changes.length} thông báo (chế độ ${notifyMode}). Không gửi, không lưu.` +
                     `\n\n${lines.join('\n')}${warn}`,
-                data: { checked: targets.length, changes: changes.length, sent: 0, dryRun: true, results: lines },
+                data: {
+                    checked: targets.length,
+                    changes: changes.length,
+                    sent: 0,
+                    dryRun: true,
+                    notifyMode,
+                    results: lines,
+                },
             };
         }
 
@@ -159,8 +177,8 @@ export const healthcheckRun: BotAction = {
         if (changes.length === 0) {
             return {
                 ok: true,
-                summary: `Đã kiểm ${targets.length} site, không có gì đổi.`,
-                data: { checked: targets.length, changes: 0, sent: 0 },
+                summary: `Đã kiểm ${targets.length} site, không có gì cần gửi (chế độ ${notifyMode}).`,
+                data: { checked: targets.length, changes: 0, sent: 0, notifyMode },
             };
         }
 
@@ -176,6 +194,7 @@ export const healthcheckRun: BotAction = {
                     sent: 0,
                     reason: 'not_configured',
                     error: target.error,
+                    notifyMode,
                 },
             };
         }
@@ -209,9 +228,9 @@ export const healthcheckRun: BotAction = {
         return {
             ok,
             summary: ok
-                ? `Đã kiểm ${targets.length} site, gửi ${sent} thông báo đổi trạng thái.`
+                ? `Đã kiểm ${targets.length} site, gửi ${sent} thông báo (chế độ ${notifyMode}).`
                 : `Đã kiểm ${targets.length} site, gửi ${sent}/${changes.length}; lỗi: ${errors.join('; ')}`,
-            data: { checked: targets.length, changes: changes.length, sent, errors },
+            data: { checked: targets.length, changes: changes.length, sent, errors, notifyMode },
         };
     },
 };

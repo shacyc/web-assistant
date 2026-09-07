@@ -66,6 +66,10 @@ pnpm run db:migrate       # apply lên D1 production
 pnpm run deploy           # build web + wrangler deploy  ← lệnh của chủ dự án
 ```
 
+`wrangler.jsonc` chốt cứng `account_id` (`01d7b4c8feb6f42134814fa644c8d4b2`) — máy đăng
+nhập nhiều tài khoản Cloudflare vẫn `dev`/`deploy` đúng chỗ, không bị hỏi chọn. D1
+`database_id` trong cùng file phải thuộc account này.
+
 ## Kiểu của binding: `src/types.ts`, không phải `wrangler types`
 
 `wrangler types` sinh `worker-configuration.d.ts` bằng cách đọc `wrangler.jsonc` **cộng
@@ -107,7 +111,9 @@ cron (1 đỏ) · kẹp `day_of_month` về ngày cuối tháng (1 đỏ) · ch�
 (1 đỏ) · `last_run_at` ghi mốc nhịp chứ không phải lúc chạy xong (1 đỏ) · ngưỡng 4xx của
 `defaultState` health-check (1 đỏ) · che `fetch` trong `runCheckScript` (1 đỏ) · chỉ gửi
 health-check khi `state` đổi (nhiều đỏ) · không ghi `last_state` khi gửi lỗi / chưa cấu
-hình (2 đỏ) · `dryRun` của health-check không ghi DB (1 đỏ).
+hình (2 đỏ) · `dryRun` của health-check không ghi DB (1 đỏ) · `on_down` bỏ qua phục hồi
+nhưng vẫn ghi `last_state` (3 đỏ) · chốt `last_run_slot` của `isDueTick` (1 đỏ) · nhánh
+`tick` trong handler `scheduled` (1 đỏ).
 
 **Chặn request ra ngoài trong test bằng `mockTelegram()` trong `test/helpers.ts`**, không
 phải `fetchMock` của `cloudflare:test` — pool 0.22 đã bỏ export đó (cùng với
@@ -157,10 +163,12 @@ tầng, "chạy gì lúc nào" là dữ liệu admin sửa qua `/admin/schedules
   (`'HH:MM'` theo `TIMEZONE`) và chốt bằng `last_run_date`. Kiểu `cron` chạy **nhiều
   lần/ngày**: biểu thức 5 trường (`lib/cron.ts`, viết tay, khớp theo giờ `TIMEZONE`),
   chốt bằng `last_run_slot` (nhịp 5 phút, UTC). Kiểu `every` chạy sau **mỗi
-  `interval_seconds`** trôi qua, chốt bằng `last_run_at`. `time_of_day` cột NOT NULL nên
-  `cron`/`every` lưu `'00:00'` làm chỗ giữ.
+  `interval_seconds`** trôi qua, chốt bằng `last_run_at`. Kiểu `tick` chạy **mọi nhịp
+  trigger** (5 phút), không xét giờ/biểu thức, không field nào — chốt bằng `last_run_slot`
+  như `cron`. `time_of_day` cột NOT NULL nên `cron`/`every`/`tick` lưu `'00:00'` làm chỗ giữ.
 - Logic "có tới lượt không" nằm gọn trong `lib/schedule.ts` (`isDueStructured`,
-  `isDueCron`, `isDueEvery`, `matchesDay`) — thuần, test riêng, không cần dựng worker.
+  `isDueCron`, `isDueEvery`, `isDueTick`, `matchesDay`) — thuần, test riêng, không cần
+  dựng worker. Handler gộp `cron` + `tick` vào một nhánh claim (cùng chốt `last_run_slot`).
 - `last_run_at` LUÔN ghi = mốc nhịp (`event.scheduledTime`), KHÔNG phải lúc action chạy
   xong — nếu không, khoảng của `every` trôi thêm vài giây mỗi vòng, lệch khỏi lưới 5 phút
   và "mỗi 1 giờ" biến thành "mỗi 1 giờ 5 phút".
@@ -191,9 +199,14 @@ trong registry. Màn `/admin/healthchecks` (danh sách + nút "Cấu hình gửi
 `/admin/config` có thêm khối cấu hình.
 
 - `healthcheck.run` fetch **song song** mọi target đang bật (timeout 10s), so `state` với
-  `last_state`, **chỉ gửi Telegram khi state đổi — cả hai chiều** (up→down cảnh báo sập,
-  down→up báo phục hồi). `last_state` null lần đầu coi như `'up'`: site đang khoẻ thì
-  chốt im lặng, site đang sập thì báo ngay.
+  `last_state`. `last_state` null lần đầu coi như `'up'`: site đang khoẻ thì chốt im
+  lặng, site đang sập thì báo ngay.
+- **Tần suất gửi** = `healthcheck_config.notify_mode` (`lib/healthcheck.ts` `shouldNotify`):
+  `always` (mọi lần kiểm, kể cả không đổi) · `on_change` (mặc định — khi state đổi, cả
+  hai chiều) · `on_down` (chỉ khi đổi SANG sập, bỏ qua phục hồi). Dù mode nào, một
+  target = một tin (không gộp). Với `on_down`, lần phục hồi vẫn **ghi `last_state`** qua
+  nhánh `rawChanged && !notify` — im lặng nhưng không bỏ sót lần sập kế tiếp. `{transition}`
+  trong template rút gọn `'up → up'` thành `'up'` cho mode `always`.
 - Luật `state` mặc định (`lib/healthcheck.ts` `defaultState`): lỗi mạng / timeout /
   **HTTP ≥ 400** → `'down'`. 4xx tính là sập — chủ dự án chọn phương án này.
 - `check_script`: thân một hàm JS admin tự viết, nhận `probe` (dữ liệu thuần: `url`,

@@ -223,20 +223,22 @@ export async function seedHealthConfig(
         topicIdKey?: string | null;
         topicId?: string;
         template?: string | null;
+        notifyMode?: string;
     } = {},
 ) {
     const chatIdKey = over.chatIdKey ?? 'secretary telegram chat id';
     const topicIdKey = over.topicIdKey === undefined ? 'secretary daily topic id' : over.topicIdKey;
     const template = over.template ?? null;
+    const notifyMode = over.notifyMode ?? 'on_change';
     if (over.chatId !== undefined) await seedVariable(chatIdKey, over.chatId);
     if (topicIdKey && over.topicId !== undefined) await seedVariable(topicIdKey, over.topicId);
     await env.assistant_db
         .prepare(
-            'INSERT INTO healthcheck_config (id, chat_id_key, topic_id_key, template) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET chat_id_key = excluded.chat_id_key, topic_id_key = excluded.topic_id_key, template = excluded.template',
+            'INSERT INTO healthcheck_config (id, chat_id_key, topic_id_key, template, notify_mode) VALUES (1, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET chat_id_key = excluded.chat_id_key, topic_id_key = excluded.topic_id_key, template = excluded.template, notify_mode = excluded.notify_mode',
         )
-        .bind(chatIdKey, topicIdKey, template)
+        .bind(chatIdKey, topicIdKey, template, notifyMode)
         .run();
-    return { chatIdKey, topicIdKey, template };
+    return { chatIdKey, topicIdKey, template, notifyMode };
 }
 
 export interface SeedOverrides {

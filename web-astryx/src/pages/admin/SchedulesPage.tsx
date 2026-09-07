@@ -53,6 +53,8 @@ function describeSchedule(r: Schedule): string {
             return `Mỗi ${fmtDuration(r.intervalSeconds ?? 0)}`;
         case 'cron':
             return `cron: ${r.cron}`;
+        case 'tick':
+            return 'Mỗi nhịp cron (5 phút)';
         default:
             return `Hằng ngày · ${r.timeOfDay}`;
     }

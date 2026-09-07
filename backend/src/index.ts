@@ -6,7 +6,7 @@ import { schedules } from './db/schema';
 import type { Bindings, Env } from './types';
 import { fail, serverError } from './lib/respond';
 import { hhmm, today, slotKeyUTC, zonedParts } from './lib/dates';
-import { isDueStructured, isDueCron, isDueEvery, parsePayload } from './lib/schedule';
+import { isDueStructured, isDueCron, isDueEvery, isDueTick, parsePayload } from './lib/schedule';
 import { runActionById } from './actions/run';
 import { botRoutes } from './routes/bot';
 import { adminRoutes } from './routes/admin';
@@ -68,8 +68,11 @@ export default {
             // và bỏ qua. Ghi chốt TRƯỚC khi chạy nên job lỗi không tự thử lại — đổi lấy
             // việc không bao giờ gửi trùng.
             let claimed: boolean;
-            if (row.kind === 'cron') {
-                if (!isDueCron(row, parts, slot)) continue;
+            if (row.kind === 'cron' || row.kind === 'tick') {
+                // 'tick' chạy mọi nhịp; 'cron' còn phải khớp biểu thức. Cả hai chốt bằng
+                // `last_run_slot` (nhịp 5 phút) nên dùng chung đoạn claim.
+                const due = row.kind === 'tick' ? isDueTick(row, slot) : isDueCron(row, parts, slot);
+                if (!due) continue;
                 const claim = await db
                     .update(schedules)
                     .set({ lastRunSlot: slot, lastRunAt: now, updatedAt: new Date() })

@@ -23,6 +23,7 @@ export interface StateChange {
  * | `{url}`           | URL                                              |
  * | `{state}`         | state mới ('up' / 'down' / chuỗi của checkScript) |
  * | `{previousState}` | state trước đó                                    |
+ * | `{transition}`    | `'up → down'`, hoặc chỉ `'up'` khi không đổi (chế độ "luôn gửi") |
  * | `{stateEmoji}`    | 🟢 nếu state mới = 'up', 🔴 nếu khác              |
  * | `{statusCode}`    | mã HTTP, hoặc '—' nếu lỗi mạng                    |
  * | `{statusLine}`    | 'HTTP 503' hoặc 'Lỗi: <câu lỗi mạng>'             |
@@ -38,6 +39,8 @@ export function templateVars(c: StateChange): Record<string, string> {
         url: c.url,
         state: c.to,
         previousState: c.from,
+        // Chế độ "luôn gửi" có thể gửi cả khi state không đổi → 'up → up' đọc dở.
+        transition: c.from === c.to ? c.to : `${c.from} → ${c.to}`,
         stateEmoji: c.to === 'up' ? '🟢' : '🔴',
         statusCode,
         statusLine,
@@ -60,7 +63,7 @@ export function formatHealthcheckMessage(c: StateChange, template: string | null
     return [
         `${vars.stateEmoji} *${escapeMd(c.label)}*`,
         escapeMd(c.url),
-        escapeMd(`${c.from} → ${c.to} · ${vars.statusLine}`),
+        escapeMd(`${vars.transition} · ${vars.statusLine}`),
         escapeMd(c.checkedAt),
     ].join('\n');
 }

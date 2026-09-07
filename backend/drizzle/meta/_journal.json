@@ -57,6 +57,13 @@
       "when": 1788513532538,
       "tag": "0007_condemned_scorpion",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788749469422,
+      "tag": "0008_fast_komodo",
+      "breakpoints": true
     }
   ]
 }

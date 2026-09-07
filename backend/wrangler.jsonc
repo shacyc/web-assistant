@@ -2,6 +2,11 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "web-assistant",
 	"main": "src/index.ts",
+	// Chốt cứng tài khoản Cloudflare theo account id: máy nào đăng nhập nhiều tài khoản
+	// thì `wrangler dev`/`deploy` không hỏi chọn và không thể deploy nhầm chỗ. Không phải
+	// bí mật — cùng account chứa D1 `database_id` bên dưới. Env `CLOUDFLARE_ACCOUNT_ID`
+	// (nếu có) vẫn ghi đè dòng này.
+	"account_id": "01d7b4c8feb6f42134814fa644c8d4b2",
 	// Trần là phiên bản workerd mà wrangler đang ghim. Muốn nâng ngày này thì nâng
 	// wrangler trước, không thì deploy sẽ từ chối.
 	"compatibility_date": "2026-07-08",

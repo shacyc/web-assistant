@@ -6,9 +6,9 @@
 import { diffDays, weekdayISO, dayOfMonth, daysInMonth, type ZonedParts } from './dates';
 import { parseCron, cronMatches } from './cron';
 
-export type ScheduleKind = 'daily' | 'weekly' | 'monthly' | 'interval' | 'cron' | 'every';
+export type ScheduleKind = 'daily' | 'weekly' | 'monthly' | 'interval' | 'cron' | 'every' | 'tick';
 
-export const SCHEDULE_KINDS: ScheduleKind[] = ['daily', 'weekly', 'monthly', 'interval', 'cron', 'every'];
+export const SCHEDULE_KINDS: ScheduleKind[] = ['daily', 'weekly', 'monthly', 'interval', 'cron', 'every', 'tick'];
 
 /** Chỉ những field mà việc "có chạy hay không" phụ thuộc vào. */
 export interface DueRow {
@@ -92,6 +92,16 @@ export function isDueEvery(row: DueRow, now: Date): boolean {
     if (row.intervalSeconds == null || row.intervalSeconds < 1) return false;
     if (row.lastRunAt == null) return true;
     return now.getTime() - row.lastRunAt.getTime() >= row.intervalSeconds * 1000;
+}
+
+/**
+ * Lịch `tick` — chạy MỌI nhịp trigger (5 phút), không xét giờ, ngày, hay biểu thức.
+ * Chốt theo `last_run_slot` như `cron` để hai lần trigger chồng nhau không chạy đôi.
+ * Không có field cấu hình: bật là chạy mỗi nhịp.
+ */
+export function isDueTick(row: DueRow, slot: string): boolean {
+    if (!row.enabled) return false;
+    return row.lastRunSlot !== slot;
 }
 
 function splitInts(csv: string | null): number[] {

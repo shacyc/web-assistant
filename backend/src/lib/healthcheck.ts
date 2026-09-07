@@ -85,3 +85,24 @@ export function probeDetail(probe: Probe): string {
     if (probe.error) return `${probe.error} (sau ${probe.durationMs}ms)`;
     return `HTTP ${probe.status} ${probe.statusText}`.trim() + ` · ${probe.durationMs}ms`;
 }
+
+export type NotifyMode = 'always' | 'on_change' | 'on_down';
+export const NOTIFY_MODES: NotifyMode[] = ['always', 'on_change', 'on_down'];
+
+/**
+ * Có gửi Telegram cho một target không, theo `notify_mode` trong `healthcheck_config`.
+ *
+ * - `always`   — mọi lần kiểm, bất kể đổi hay không.
+ * - `on_change`— khi `state` khác lần trước (cả hai chiều: sập VÀ phục hồi).
+ * - `on_down`  — chỉ khi `state` đổi VÀ state mới không phải `'up'` (bỏ qua phục hồi).
+ *
+ * `prev` là `last_state ?? 'up'` — lần kiểm đầu (chưa có `last_state`) coi như đang 'up'.
+ * Nhánh "đổi nhưng không gửi" ở `actions/healthcheck.ts` vẫn ghi `last_state`, nên
+ * `on_down` không bỏ sót lần sập kế tiếp chỉ vì đã im lặng ở lần phục hồi.
+ */
+export function shouldNotify(mode: string, prev: string, state: string): boolean {
+    if (mode === 'always') return true;
+    if (state === prev) return false;
+    if (mode === 'on_down') return state !== 'up';
+    return true; // on_change: mọi thay đổi
+}

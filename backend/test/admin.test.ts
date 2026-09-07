@@ -244,22 +244,52 @@ describe('cấu hình health-check', () => {
             chatIdKey: string | null;
             topicIdKey: string | null;
             template: string | null;
+            notifyMode: string;
         };
-        expect(before).toEqual({ chatIdKey: null, topicIdKey: null, template: null });
+        expect(before).toEqual({ chatIdKey: null, topicIdKey: null, template: null, notifyMode: 'on_change' });
 
         await env.assistant_db.prepare("INSERT INTO variables (key, value) VALUES ('hc chat', '-100')").run();
         const put = await req('/api/admin/healthcheck-config', {
             method: 'PUT',
             cookie,
-            body: JSON.stringify({ chatIdKey: 'hc chat', topicIdKey: null, template: '{stateEmoji} {label}' }),
+            body: JSON.stringify({ chatIdKey: 'hc chat', topicIdKey: null, template: '{stateEmoji} {label}', notifyMode: 'on_down' }),
         });
         expect(put.status).toBe(200);
 
         const after = (await (await req('/api/admin/healthcheck-config', { cookie })).json()) as {
             chatIdKey: string | null;
             template: string | null;
+            notifyMode: string;
         };
         expect(after.chatIdKey).toBe('hc chat');
         expect(after.template).toBe('{stateEmoji} {label}');
+        expect(after.notifyMode).toBe('on_down');
+    });
+
+    it('notifyMode không hợp lệ → 400 field notifyMode', async () => {
+        const res = await req('/api/admin/healthcheck-config', {
+            method: 'PUT',
+            cookie: COOKIE,
+            body: JSON.stringify({ chatIdKey: null, topicIdKey: null, template: null, notifyMode: 'sometimes' }),
+        });
+        expect(res.status).toBe(400);
+        expect(((await res.json()) as { field: string }).field).toBe('notifyMode');
+    });
+
+    it('PUT không gửi notifyMode → về mặc định on_change', async () => {
+        await req('/api/admin/healthcheck-config', {
+            method: 'PUT',
+            cookie: COOKIE,
+            body: JSON.stringify({ chatIdKey: null, topicIdKey: null, template: null, notifyMode: 'always' }),
+        });
+        await req('/api/admin/healthcheck-config', {
+            method: 'PUT',
+            cookie: COOKIE,
+            body: JSON.stringify({ chatIdKey: null, topicIdKey: null, template: null }),
+        });
+        const after = (await (await req('/api/admin/healthcheck-config', { cookie: COOKIE })).json()) as {
+            notifyMode: string;
+        };
+        expect(after.notifyMode).toBe('on_change');
     });
 });

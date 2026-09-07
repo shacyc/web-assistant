@@ -144,6 +144,10 @@ export const healthcheckConfig = sqliteTable('healthcheck_config', {
     // định dạng mặc định trong `telegram/healthcheckFormat.ts`. Chữ literal là markup
     // admin tự chịu trách nhiệm escape; chỉ GIÁ TRỊ thay vào mới được auto-escape.
     template: text('template'),
+    // Tần suất gửi Telegram: 'always' (mọi lần kiểm) | 'on_change' (khi state đổi, cả
+    // hai chiều) | 'on_down' (chỉ khi state đổi sang sập, bỏ qua phục hồi). NOT NULL +
+    // default để dòng cũ và migrate không có giá trị null. Xem `lib/healthcheck.ts`.
+    notifyMode: text('notify_mode').notNull().default('on_change'),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).$defaultFn(() => new Date()),
 });
 

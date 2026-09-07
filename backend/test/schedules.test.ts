@@ -84,6 +84,8 @@ describe('admin /schedules CRUD', () => {
         expect((await mk({ kind: 'interval', timeOfDay: '08:00', intervalDays: 3, anchorDate: '2026-09-01' })).status).toBe(201);
         expect((await mk({ kind: 'cron', cron: '*/15 9-17 * * 1-5' })).status).toBe(201);
         expect((await mk({ kind: 'every', intervalSeconds: 5400 })).status).toBe(201);
+        // 'tick' không cần field nào — chỉ actionId + kind.
+        expect((await mk({ kind: 'tick' })).status).toBe(201);
 
         const { schedules } = (await (await api('GET', '/api/admin/schedules')).json()) as {
             schedules: Array<Record<string, unknown>>;
@@ -97,6 +99,10 @@ describe('admin /schedules CRUD', () => {
         const every = schedules.find((s) => s.kind === 'every')!;
         expect(every.intervalSeconds).toBe(5400);
         expect(every.cron).toBe(null);
+        const tick = schedules.find((s) => s.kind === 'tick')!;
+        expect(tick.timeOfDay).toBe('00:00'); // chỗ giữ cho cột NOT NULL
+        expect(tick.cron).toBe(null);
+        expect(tick.intervalSeconds).toBe(null);
     });
 
     it('từ chối cấu hình lặp sai', async () => {
@@ -372,6 +378,28 @@ describe('cron scheduled handler — kiểu lặp', () => {
         const logs = await env.assistant_db.prepare("SELECT COUNT(*) n FROM execution_logs WHERE detail LIKE '[cron]%'").all();
         expect(logs.results[0].n).toBe(2);
         expect((await stamp(job.id)).last_run_slot).toBe('2026-09-06T22:00');
+    });
+
+    it('tick: chạy MỌI nhịp — không xét giờ/biểu thức, chốt bằng last_run_slot', async () => {
+        const job = await seedSchedule({ kind: 'tick', timeOfDay: '00:00' });
+
+        await fireAt(MON_0430);
+        await fireAt(MON_0430); // cùng nhịp → không chạy lại
+        await fireAt(Date.parse('2026-09-06T22:00:00Z')); // slot mới → chạy tiếp
+
+        const logs = await env.assistant_db.prepare("SELECT COUNT(*) n FROM execution_logs WHERE detail LIKE '[cron]%'").all();
+        expect(logs.results[0].n).toBe(2);
+        const s = await stamp(job.id);
+        expect(s.last_run_slot).toBe('2026-09-06T22:00');
+        expect(s.last_run_status).toBe('ok');
+    });
+
+    it('tick: enabled = false → bỏ qua', async () => {
+        const off = await seedSchedule({ kind: 'tick', timeOfDay: '00:00', enabled: 0 });
+        await fireAt(MON_0430);
+        expect((await stamp(off.id)).last_run_slot).toBe(null);
+        const logs = await env.assistant_db.prepare("SELECT COUNT(*) n FROM execution_logs WHERE detail LIKE '[cron]%'").all();
+        expect(logs.results[0].n).toBe(0);
     });
 
     it('every: chạy khi đủ khoảng, bỏ khi chưa đủ, không trôi khỏi lưới 5 phút', async () => {

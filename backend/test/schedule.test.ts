@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isDueStructured, isDueCron, isDueEvery, matchesDay, parsePayload, type DueRow } from '../src/lib/schedule';
+import { isDueStructured, isDueCron, isDueEvery, isDueTick, matchesDay, parsePayload, type DueRow } from '../src/lib/schedule';
 import { hhmm, isValidHHMM, weekdayISO, dayOfMonth, daysInMonth, slotKeyUTC, zonedParts } from '../src/lib/dates';
 
 // DueRow đầy đủ, test chỉ ghi đè field cần thiết.
@@ -116,6 +116,26 @@ describe('isDueEvery', () => {
 
     it('thiếu intervalSeconds → không, không ném', () => {
         expect(isDueEvery(row({ kind: 'every', intervalSeconds: null, lastRunAt: null }), NOW)).toBe(false);
+    });
+});
+
+describe('isDueTick', () => {
+    const slot = '2026-09-06T21:30';
+
+    it('bật + nhịp này chưa chạy → chạy', () => {
+        expect(isDueTick(row({ kind: 'tick' }), slot)).toBe(true);
+    });
+
+    it('đã chạy nhịp này rồi → không (canh chốt last_run_slot)', () => {
+        expect(isDueTick(row({ kind: 'tick', lastRunSlot: slot }), slot)).toBe(false);
+    });
+
+    it('nhịp khác → chạy lại', () => {
+        expect(isDueTick(row({ kind: 'tick', lastRunSlot: '2026-09-06T21:25' }), slot)).toBe(true);
+    });
+
+    it('enabled = false → không (canh nhánh enabled)', () => {
+        expect(isDueTick(row({ kind: 'tick', enabled: false }), slot)).toBe(false);
     });
 });
 

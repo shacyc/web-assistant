@@ -7,6 +7,7 @@ import {
     testHealthCheckConfig,
     ApiError,
     type Variable,
+    type HealthCheckNotifyMode,
 } from '@/lib/apiClient';
 import { HStack, VStack } from '@astryxdesign/core/Stack';
 import { Text } from '@astryxdesign/core/Text';
@@ -29,6 +30,24 @@ function optionsFor(keys: string[], selected: string): SelectorOptionType[] {
 
 const TEMPLATE_MAX = 4096;
 
+const NOTIFY_MODE_OPTIONS: { value: HealthCheckNotifyMode; label: string; hint: string }[] = [
+    {
+        value: 'always',
+        label: 'Luôn gửi',
+        hint: 'Mỗi lần cron kiểm là gửi báo cáo cho mọi site, bất kể trạng thái. Lịch 5 phút = rất nhiều tin nhắn.',
+    },
+    {
+        value: 'on_change',
+        label: 'Chỉ khi có thay đổi',
+        hint: 'Gửi khi một site đổi trạng thái — cả sập lẫn phục hồi.',
+    },
+    {
+        value: 'on_down',
+        label: 'Chỉ khi sập',
+        hint: 'Chỉ gửi khi một site chuyển sang sập. Phục hồi không báo.',
+    },
+];
+
 type Placeholder = { token: string; desc: string };
 
 // Thay theo từng lần state đổi; chữ còn lại trong mẫu giữ nguyên.
@@ -37,6 +56,7 @@ const PLACEHOLDERS: Placeholder[] = [
     { token: '{url}', desc: 'URL' },
     { token: '{state}', desc: "Trạng thái mới ('up' / 'down' / chuỗi của checkScript)" },
     { token: '{previousState}', desc: 'Trạng thái trước đó' },
+    { token: '{transition}', desc: "'up → down', hoặc chỉ 'up' khi không đổi (chế độ Luôn gửi)" },
     { token: '{stateEmoji}', desc: '🟢 nếu state mới = up, 🔴 nếu khác' },
     { token: '{statusCode}', desc: "Mã HTTP, hoặc '—' nếu lỗi mạng" },
     { token: '{statusLine}', desc: "'HTTP 503' hoặc 'Lỗi: <câu lỗi mạng>'" },
@@ -45,7 +65,7 @@ const PLACEHOLDERS: Placeholder[] = [
     { token: '{checkedAt}', desc: 'Lúc kiểm, DD/MM/YYYY HH:MM' },
 ];
 
-const TEMPLATE_EXAMPLE = '{stateEmoji} *{label}*\n{url}\n{previousState} → {state} · {statusLine}\n{checkedAt}';
+const TEMPLATE_EXAMPLE = '{stateEmoji} *{label}*\n{url}\n{transition} · {statusLine}\n{checkedAt}';
 
 /** Danh sách tham số — ấn vào tên để copy, rê chuột để xem mô tả. */
 function TokenList({ items }: { items: Placeholder[] }) {
@@ -89,6 +109,7 @@ export function HealthCheckConfigForm({ onSaved, autoFocus }: Props) {
     const [chatIdKey, setChatIdKey] = useState('');
     const [topicIdKey, setTopicIdKey] = useState('');
     const [template, setTemplate] = useState('');
+    const [notifyMode, setNotifyMode] = useState<HealthCheckNotifyMode>('on_change');
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [testing, setTesting] = useState(false);
@@ -102,6 +123,7 @@ export function HealthCheckConfigForm({ onSaved, autoFocus }: Props) {
                 setChatIdKey(cfg.chatIdKey ?? '');
                 setTopicIdKey(cfg.topicIdKey ?? '');
                 setTemplate(cfg.template ?? '');
+                setNotifyMode(cfg.notifyMode ?? 'on_change');
             })
             .catch((err) => setError(err instanceof ApiError ? err.message : 'Không tải được cấu hình'))
             .finally(() => setLoading(false));
@@ -128,6 +150,7 @@ export function HealthCheckConfigForm({ onSaved, autoFocus }: Props) {
                 chatIdKey: chatIdKey || null,
                 topicIdKey: topicIdKey || null,
                 template: template.trim() || null,
+                notifyMode,
             });
             setNotice('Đã lưu cấu hình health-check');
             onSaved?.();
@@ -206,16 +229,31 @@ export function HealthCheckConfigForm({ onSaved, autoFocus }: Props) {
                     )}
                 </VStack>
 
+                <VStack gap={1}>
+                    <Selector
+                        label="Tần suất gửi"
+                        options={NOTIFY_MODE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                        value={notifyMode}
+                        onChange={(v) => setNotifyMode((v as HealthCheckNotifyMode) || 'on_change')}
+                    />
+                    <Text
+                        type="supporting"
+                        color={notifyMode === 'always' ? 'accent' : 'secondary'}
+                    >
+                        {NOTIFY_MODE_OPTIONS.find((o) => o.value === notifyMode)?.hint}
+                    </Text>
+                </VStack>
+
                 <VStack gap={2}>
                     <Text type="label" color="primary">Mẫu tin nhắn</Text>
                     <Text type="supporting" color="secondary">
-                        Để trống = dùng mẫu mặc định. Render một lần cho mỗi lần một site đổi trạng thái.
+                        Để trống = dùng mẫu mặc định. Render một lần cho mỗi thông báo (mỗi site một tin).
                         Ấn vào tên tham số để copy.
                     </Text>
 
                     <TextArea
                         label="Nội dung"
-                        description="Gửi mỗi khi một site chuyển sang sập hoặc phục hồi."
+                        description="Một tin cho mỗi site được gửi, theo tần suất ở trên."
                         placeholder={TEMPLATE_EXAMPLE}
                         value={template}
                         onChange={setTemplate}

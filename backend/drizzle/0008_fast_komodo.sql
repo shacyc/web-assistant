@@ -1,0 +1,1 @@
+ALTER TABLE `healthcheck_config` ADD `notify_mode` text DEFAULT 'on_change' NOT NULL;

@@ -46,6 +46,11 @@ describe('templateVars', () => {
         expect(v.stateEmoji).toBe('🟢');
         expect(v.statusLine).toBe('HTTP 200');
     });
+
+    it('transition: có đổi → "from → to"; không đổi → chỉ "to"', () => {
+        expect(templateVars(change({ from: 'up', to: 'down' })).transition).toBe('up → down');
+        expect(templateVars(change({ from: 'up', to: 'up' })).transition).toBe('up');
+    });
 });
 
 describe('formatHealthcheckMessage — mẫu mặc định', () => {
@@ -66,6 +71,16 @@ describe('formatHealthcheckMessage — mẫu mặc định', () => {
         );
         expect(msg).toContain('🟢');
         expect(msg).toContain('down → up');
+    });
+
+    it('không đổi (chế độ Luôn gửi) → hiển thị chỉ state, không phải "up → up"', () => {
+        const msg = formatHealthcheckMessage(
+            change({ from: 'up', to: 'up', probe: probe({ ok: true, status: 200, statusText: 'OK', error: null }) }),
+            null,
+        );
+        expect(msg).toContain('🟢');
+        expect(msg).not.toContain('up → up');
+        expect(msg).toContain('up · HTTP 200');
     });
 });
 

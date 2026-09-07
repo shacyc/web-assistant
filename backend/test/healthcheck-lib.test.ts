@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { defaultState, runCheckScript, evaluateTarget, probeDetail, type Probe } from '../src/lib/healthcheck';
+import { defaultState, runCheckScript, evaluateTarget, probeDetail, shouldNotify, type Probe } from '../src/lib/healthcheck';
 
 const base: Probe = {
     url: 'https://x.example',
@@ -100,5 +100,32 @@ describe('probeDetail', () => {
     });
     it('lỗi mạng → câu lỗi + thời gian', () => {
         expect(probeDetail(p({ status: null, error: 'timeout sau 10s', durationMs: 10000 }))).toContain('timeout sau 10s');
+    });
+});
+
+describe('shouldNotify — tần suất gửi', () => {
+    it('always: gửi kể cả khi không đổi', () => {
+        expect(shouldNotify('always', 'up', 'up')).toBe(true);
+        expect(shouldNotify('always', 'up', 'down')).toBe(true);
+        expect(shouldNotify('always', 'down', 'up')).toBe(true);
+    });
+
+    it('on_change: chỉ khi đổi, cả hai chiều', () => {
+        expect(shouldNotify('on_change', 'up', 'up')).toBe(false);
+        expect(shouldNotify('on_change', 'up', 'down')).toBe(true); // sập
+        expect(shouldNotify('on_change', 'down', 'up')).toBe(true); // phục hồi
+    });
+
+    it('on_down: chỉ khi đổi SANG sập, bỏ qua phục hồi', () => {
+        expect(shouldNotify('on_down', 'up', 'up')).toBe(false);
+        expect(shouldNotify('on_down', 'up', 'down')).toBe(true); // sập → gửi
+        expect(shouldNotify('on_down', 'down', 'up')).toBe(false); // phục hồi → im
+        // state tuỳ checkScript, không phải 'up' → coi là sập
+        expect(shouldNotify('on_down', 'up', 'degraded')).toBe(true);
+    });
+
+    it('mode lạ → coi như on_change (mọi thay đổi)', () => {
+        expect(shouldNotify('wat', 'up', 'down')).toBe(true);
+        expect(shouldNotify('wat', 'up', 'up')).toBe(false);
     });
 });

@@ -41,10 +41,11 @@ const KIND_OPTIONS: { value: ScheduleKind; label: string }[] = [
     { value: 'interval', label: 'Mỗi N ngày' },
     { value: 'every', label: 'Mỗi khoảng thời gian' },
     { value: 'cron', label: 'Biểu thức cron' },
+    { value: 'tick', label: 'Mỗi nhịp cron (5 phút)' },
 ];
 
 // Kiểu không dùng "giờ trong ngày".
-const NO_TIME_OF_DAY: ScheduleKind[] = ['cron', 'every'];
+const NO_TIME_OF_DAY: ScheduleKind[] = ['cron', 'every', 'tick'];
 
 function splitSeconds(total: number): { h: string; m: string; s: string } {
     return {
@@ -192,6 +193,9 @@ export function ScheduleFormDialog({ isOpen, editing, actions, onOpenChange, onS
             return { ...base, intervalSeconds: secs };
         }
 
+        // 'tick' không có tham số nào — chạy mọi nhịp.
+        if (kind === 'tick') return { ...base };
+
         const time = timeOfDay.slice(0, 5);
         if (!HHMM_RE.test(time)) {
             setError('Chọn giờ chạy (HH:MM)');
@@ -284,6 +288,12 @@ export function ScheduleFormDialog({ isOpen, editing, actions, onOpenChange, onS
                             value={createISOTimeString(timeOfDay) ?? undefined}
                             onChange={(v) => setTimeOfDay((v ?? '').slice(0, 5))}
                         />
+                    )}
+
+                    {kind === 'tick' && (
+                        <Text type="supporting" color="secondary">
+                            Chạy mỗi lần trigger cron bắn — tức mỗi 5 phút, không giới hạn giờ. Không có tham số.
+                        </Text>
                     )}
 
                     {kind === 'every' && (

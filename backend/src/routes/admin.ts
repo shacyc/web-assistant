@@ -22,6 +22,7 @@ import { getAction, listActions } from '../actions/registry';
 import { runActionById } from '../actions/run';
 import { parsePayload, SCHEDULE_KINDS } from '../lib/schedule';
 import { parseCron } from '../lib/cron';
+import { NOTIFY_MODES } from '../lib/healthcheck';
 
 export const adminRoutes = new Hono<Env>();
 
@@ -479,6 +480,7 @@ adminRoutes.get('/healthcheck-config', async (c) => {
         chatIdKey: row?.chatIdKey ?? null,
         topicIdKey: row?.topicIdKey ?? null,
         template: row?.template ?? null,
+        notifyMode: row?.notifyMode ?? 'on_change',
     });
 });
 
@@ -494,16 +496,22 @@ adminRoutes.put('/healthcheck-config', async (c) => {
     const chatIdKey = f.optionalString('chatIdKey', KEY_MAX) ?? null;
     const topicIdKey = f.optionalString('topicIdKey', KEY_MAX) ?? null;
     const template = f.optionalString('template', TEMPLATE_MAX) ?? null;
+    // notify_mode cột NOT NULL — vắng mặt/null quay về mặc định 'on_change'.
+    const notifyModeRaw = f.optionalString('notifyMode', 20);
+    if (!f.error && notifyModeRaw && !NOTIFY_MODES.includes(notifyModeRaw as (typeof NOTIFY_MODES)[number])) {
+        f.reject('notifyMode', `phải là một trong: ${NOTIFY_MODES.join(', ')}`);
+    }
     if (f.error) return invalidBody(c, f.error);
+    const notifyMode = notifyModeRaw || 'on_change';
 
     try {
         const db = drizzle(c.env.assistant_db, { schema });
         await db
             .insert(healthcheckConfig)
-            .values({ id: 1, chatIdKey, topicIdKey, template })
+            .values({ id: 1, chatIdKey, topicIdKey, template, notifyMode })
             .onConflictDoUpdate({
                 target: healthcheckConfig.id,
-                set: { chatIdKey, topicIdKey, template, updatedAt: new Date() },
+                set: { chatIdKey, topicIdKey, template, notifyMode, updatedAt: new Date() },
             });
         return c.json({ ok: true });
     } catch (err) {
@@ -585,6 +593,11 @@ function parseRecurrence(f: Body, raw: Record<string, unknown>): Recurrence {
 
     if (kind === 'every') {
         out.intervalSeconds = f.requiredInt('intervalSeconds', EVERY_MIN_SEC, EVERY_MAX_SEC);
+        return out;
+    }
+
+    if (kind === 'tick') {
+        // Không field nào — bật là chạy mọi nhịp. `time_of_day` giữ '00:00' (cột NOT NULL).
         return out;
     }
 

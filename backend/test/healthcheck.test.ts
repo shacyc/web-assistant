@@ -268,6 +268,80 @@ describe('healthcheck.run', () => {
     });
 });
 
+describe('healthcheck.run — tần suất gửi (notify_mode)', () => {
+    it("always: site UP không đổi → VẪN gửi 1 tin", async () => {
+        await seedHealthConfig({ chatId: CHAT_ID, topicId: TOPIC_ID, notifyMode: 'always' });
+        await seedHealthTarget({ label: 'A', url: 'https://a.example/h', lastState: 'up' });
+        m.on('https://a.example/h', { status: 200 });
+
+        const body = (await (await run()).json()) as { data: { sent: number; notifyMode: string } };
+        expect(body.data.sent).toBe(1);
+        expect(body.data.notifyMode).toBe('always');
+        expect(m.telegram).toHaveLength(1);
+        // 'up' → 'up': {transition} rút gọn còn 'up', không phải 'up → up'
+        expect(m.telegram[0].text).toContain('up');
+        expect(m.telegram[0].text).not.toContain('up → up');
+    });
+
+    it('always: mỗi site được kiểm là một tin', async () => {
+        await seedHealthConfig({ chatId: CHAT_ID, topicId: TOPIC_ID, notifyMode: 'always' });
+        await seedHealthTarget({ label: 'A', url: 'https://a.example/h', lastState: 'up' });
+        await seedHealthTarget({ label: 'B', url: 'https://b.example/h', lastState: 'down' });
+        m.on('https://a.example/h', { status: 200 });
+        m.on('https://b.example/h', { status: 500 });
+
+        await run();
+        expect(m.telegram).toHaveLength(2);
+    });
+
+    it('on_down: sập (up→down) → gửi', async () => {
+        await seedHealthConfig({ chatId: CHAT_ID, topicId: TOPIC_ID, notifyMode: 'on_down' });
+        await seedHealthTarget({ label: 'A', url: 'https://a.example/h', lastState: 'up' });
+        m.on('https://a.example/h', { status: 503 });
+
+        const body = (await (await run()).json()) as { data: { sent: number } };
+        expect(body.data.sent).toBe(1);
+        expect(m.telegram).toHaveLength(1);
+        expect((await stateOf('A')).last_state).toBe('down');
+    });
+
+    it('on_down: phục hồi (down→up) → KHÔNG gửi, nhưng last_state VẪN cập nhật lên up', async () => {
+        await seedHealthConfig({ chatId: CHAT_ID, topicId: TOPIC_ID, notifyMode: 'on_down' });
+        await seedHealthTarget({ label: 'A', url: 'https://a.example/h', lastState: 'down' });
+        m.on('https://a.example/h', { status: 200 });
+
+        const body = (await (await run()).json()) as { data: { sent: number; changes: number } };
+        expect(body.data.sent).toBe(0);
+        expect(m.telegram).toHaveLength(0);
+        // Ghi last_state để lần sập KẾ TIẾP vẫn phát hiện được.
+        expect((await stateOf('A')).last_state).toBe('up');
+    });
+
+    it('on_down: sau khi im lặng lúc phục hồi, lần sập kế tiếp vẫn gửi', async () => {
+        await seedHealthConfig({ chatId: CHAT_ID, topicId: TOPIC_ID, notifyMode: 'on_down' });
+        await seedHealthTarget({ label: 'A', url: 'https://a.example/h', lastState: 'down' });
+        m.on('https://a.example/h', { status: 200 });
+        await run(); // phục hồi, im lặng, last_state → up
+        expect(m.telegram).toHaveLength(0);
+
+        m.restore();
+        m = mockHttp();
+        m.on('https://a.example/h', { status: 500 });
+        await run(); // sập lại
+        expect(m.telegram).toHaveLength(1);
+    });
+
+    it('mặc định (không set) = on_change: phục hồi vẫn gửi', async () => {
+        await seedHealthConfig({ chatId: CHAT_ID, topicId: TOPIC_ID }); // notifyMode mặc định
+        await seedHealthTarget({ label: 'A', url: 'https://a.example/h', lastState: 'down' });
+        m.on('https://a.example/h', { status: 200 });
+
+        await run();
+        expect(m.telegram).toHaveLength(1);
+        expect(m.telegram[0].text).toContain('🟢');
+    });
+});
+
 describe('POST /api/admin/healthchecks/run — nút "Kiểm tra ngay" trên list', () => {
     const runReq = async () =>
         SELF.fetch('https://x/api/admin/healthchecks/run', {
